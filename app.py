@@ -23,7 +23,6 @@ except Exception as e:
     st.stop()
 
 # ================= 2. 极简稳定版登录逻辑 =================
-# 彻底移除导致卡死的 stx.CookieManager，使用最原生稳定的 session_state
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
@@ -57,7 +56,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = user_info["name"]
                 st.session_state["role"] = user_info["role"]
-                st.rerun() # 原生刷新，瞬间响应，绝不卡死
+                st.rerun() 
             else:
                 st.error("⚠️ 账号或密码错误！")
     st.stop()
@@ -156,12 +155,31 @@ else:
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
                 audio_val = True if audio_opt == "生成配套音效/配乐" else False
                 
+                # ==========================================
+                # 终极纯净版：所有素材必须放进 content 数组
+                # 完全丢弃自定义的外部参数
+                # ==========================================
                 api_content = [{"type": "text", "text": prompt}]
                 
                 img_b64_first = encode_image(uploaded_first)
                 img_b64_last = encode_image(uploaded_last)
                 
-                # API V2.5 规范参数
+                # 添加首帧
+                if img_b64_first:
+                    api_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_b64_first},
+                        "role": "first_frame"
+                    })
+                # 添加尾帧
+                if img_b64_last:
+                    api_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_b64_last},
+                        "role": "last_frame"
+                    })
+
+                # 最干净的官方载荷结构
                 payload = {
                     "model": model_id,
                     "content": api_content,
@@ -169,18 +187,6 @@ else:
                     "ratio": ratio_val,
                     "duration": dur_val
                 }
-                
-                if img_b64_first or img_b64_last:
-                    if not is_fast:
-                        img_ref = {}
-                        if img_b64_first: img_ref["first_frame_url"] = img_b64_first
-                        if img_b64_last: img_ref["last_frame_url"] = img_b64_last
-                        payload["image_reference"] = img_ref
-                    else:
-                        images_array = []
-                        if img_b64_first: images_array.append({"url": img_b64_first})
-                        if img_b64_last: images_array.append({"url": img_b64_last})
-                        payload["all_to_all_reference"] = {"image_reference": images_array}
                 
                 headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
                 
