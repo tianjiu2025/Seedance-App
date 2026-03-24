@@ -13,15 +13,14 @@ SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 SEEDANCE_API_TOKEN = st.secrets["SEEDANCE_API_TOKEN"]
-CREATE_URL = "http://118.196.64.1/api/v1/doubao/create"
-GET_URL = "http://118.196.64.1/api/v1/doubao/get_result"
+
+# 真实的 Seedance API 接口地址
+CREATE_URL = "http://118.196.64.1/api/v1/doubao/create" 
+GET_URL = "http://118.196.64.1/api/v1/doubao/get_result" 
 
 # ================= 2. 记忆芯片 (Cookie 自动登录) =================
-@st.cache_resource
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+# 【修复报错】：去掉缓存装饰器，直接使用固定 key 实例化
+cookie_manager = stx.CookieManager(key="cookie_mgr")
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -48,7 +47,6 @@ if not st.session_state["logged_in"]:
         pwd_input = st.text_input("🔑 登录密码", type="password")
         
         if st.button("🚀 登录系统", use_container_width=True):
-            # 员工账号库
             users = {
                 "admin": {"pwd": "888888", "name": "天九老板", "role": "admin"},
                 "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
@@ -62,10 +60,10 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = user_info["name"]
                 st.session_state["role"] = user_info["role"]
-                # 写入 Cookie，保存 30 天免登录
+                # 写入 Cookie
                 cookie_manager.set("seedance_user", user_info["name"], max_age=30*24*3600)
                 cookie_manager.set("seedance_role", user_info["role"], max_age=30*24*3600)
-                time.sleep(0.5)
+                time.sleep(1) # 给浏览器一点时间写入 Cookie
                 st.rerun()
             else:
                 st.error("⚠️ 账号或密码错误！")
@@ -96,7 +94,7 @@ if st.session_state["role"] == "admin":
 
 # ================= 5. 员工真实创作台 =================
 else:
-    st.markdown("## 🎬 魔方国际影业 - Seedance 2.0")
+    st.markdown("## 🎬 魔方国际影业 - Seedance 2.0 视频生成")
     
     with st.container(border=True):
         prompt = st.text_area("📝 画面描述 (Prompt)", height=100)
@@ -145,7 +143,7 @@ else:
                 status_box = st.info("⏳ 正在打包数据，请求云端引擎...")
                 progress_bar = st.progress(10)
                 
-                # 1. 组装 API 参数
+                # 1. 组装官方 API 参数
                 model_id = "ep-20260307130721-bx7tv" if "画质" in model_type else "ep-20260307130821-xw5wf"
                 ratio_val = "adaptive" if ratio == "自适应" else ratio
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
@@ -181,7 +179,7 @@ else:
                     
                     # 3. 轮询获取结果
                     while True:
-                        time.sleep(8) # 每8秒查一次
+                        time.sleep(5) 
                         status_res = requests.post(GET_URL, headers=headers, json={"id": task_id}).json()
                         current_status = status_res.get("status")
                         
@@ -195,7 +193,7 @@ else:
                             progress_bar.progress(100)
                             status_box.success("🎉 生成大功告成！")
                             video_url = status_res.get("content", {}).get("video_url")
-                            st.video(video_url) # 播放真实生成的视频
+                            st.video(video_url) 
                             
                             # 记账
                             tokens_used = status_res.get("usage", {}).get("completion_tokens", 15)
@@ -208,6 +206,8 @@ else:
                             break
                         elif current_status in ["failed", "cancelled", "expired"]:
                             status_box.error(f"❌ 生成失败，状态: {current_status}")
+                            if "error" in status_res:
+                                st.error(f"错误信息: {status_res['error'].get('message', '未知错误')}")
                             break
                             
                 except Exception as e:
