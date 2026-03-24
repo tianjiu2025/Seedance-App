@@ -132,7 +132,7 @@ else:
             with c2: uploaded_last = st.file_uploader("🖼️ 上传参考【尾帧】图", type=allowed_types)
 
         # ==========================================
-        # 核心突破：平衡 2K 超清画质与 Base64 传输限制
+        # 终极铁血压缩机制：彻底终结 Base64 长度报警
         # ==========================================
         def encode_image(upload_file):
             if not upload_file: return None
@@ -141,23 +141,23 @@ else:
                 if image.mode in ("RGBA", "P"):
                     image = image.convert("RGB")
                 
-                # 防呆预警 (官方限制比例 0.4 ~ 2.5)
                 width, height = image.size
                 aspect_ratio = width / height
                 if aspect_ratio < 0.4 or aspect_ratio > 2.5:
                     st.warning(f"⚠️ 图片比例 {aspect_ratio:.2f} 超出 (0.4 ~ 2.5) 范围，可能会被引擎拒绝！")
 
-                # 【终极优化】：设定为 2560 像素（2K级别人像极限清晰度）
-                # 保证图片极度清晰，同时将体积控制在 1MB 左右，完美绕过"大文件请勿使用 Base64"的限制！
-                max_size = 2560
+                # 【绝对红线】：强制对齐引擎输出天花板 (720p = 1280像素)
+                # 这能保证 Base64 字符串绝对不会超长，同时不损失最终生成的任何画质！
+                max_size = 1280
                 if max(image.size) > max_size:
                     image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
                     
                 buffered = io.BytesIO()
-                image.save(buffered, format="JPEG", quality=90)
+                image.save(buffered, format="JPEG", quality=80)
                 img_bytes = buffered.getvalue()
                 
-                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                # 抹除任何可能导致解析失败的回车换行符
+                b64 = base64.b64encode(img_bytes).decode("utf-8").replace('\n', '').replace('\r', '')
                 return f"data:image/jpeg;base64,{b64}"
             except Exception as e:
                 st.error(f"⚠️ 图片处理异常: {e}")
@@ -171,7 +171,7 @@ else:
             elif ref_mode == "首尾帧生成" and (not uploaded_first or not uploaded_last):
                 st.warning("⚠️ 此模式必须上传首尾两张图片！")
             else:
-                status_box = st.info("⏳ 正在打包并压缩数据，请求云端引擎...")
+                status_box = st.info("⏳ 正在打包并极致压缩数据，请求云端引擎...")
                 progress_bar = st.progress(10)
                 
                 is_fast = "fast" in model_type
@@ -199,7 +199,6 @@ else:
                         "role": "last_frame"
                     })
 
-                # 最干净的官方载荷结构
                 payload = {
                     "model": model_id,
                     "content": api_content,
