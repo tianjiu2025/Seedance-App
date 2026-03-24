@@ -2,6 +2,8 @@ import streamlit as st
 import time
 import requests
 import base64
+import io
+from PIL import Image
 from supabase import create_client, Client
 
 # ================= 1. 核心配置与 API 密钥 =================
@@ -120,7 +122,7 @@ else:
         
         uploaded_first = None
         uploaded_last = None
-        allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'heic']
+        allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
 
         if ref_mode == "首帧生成":
             uploaded_first = st.file_uploader("🖼️ 上传参考【首帧】图", type=allowed_types)
@@ -129,13 +131,38 @@ else:
             with c1: uploaded_first = st.file_uploader("🖼️ 上传参考【首帧】图", type=allowed_types)
             with c2: uploaded_last = st.file_uploader("🖼️ 上传参考【尾帧】图", type=allowed_types)
 
+        # ==========================================
+        # 核心修复：尊重原图画质，严格遵循文档物理上限
+        # ==========================================
         def encode_image(upload_file):
             if not upload_file: return None
-            ext = upload_file.name.split('.')[-1].lower()
-            if ext == 'jpg': ext = 'jpeg'
-            img_bytes = upload_file.getvalue()
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            return f"data:image/{ext};base64,{b64}"
+            try:
+                image = Image.open(upload_file)
+                if image.mode in ("RGBA", "P"):
+                    image = image.convert("RGB")
+                
+                # 检查1：宽高比防呆预警 (官方限制 0.4 ~ 2.5)
+                width, height = image.size
+                aspect_ratio = width / height
+                if aspect_ratio < 0.4 or aspect_ratio > 2.5:
+                    st.warning(f"⚠️ 您的图片比例为 {aspect_ratio:.2f}，超出了引擎允许的 (0.4 ~ 2.5) 范围。如果提交失败，请先对图片进行裁切！")
+
+                # 检查2：逼近官方允许的最高画质极限 (长边不超过 6000 px)
+                # 使用 5990 留出安全冗余
+                max_size = 5990
+                if max(image.size) > max_size:
+                    image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                    
+                buffered = io.BytesIO()
+                # 质量设置为 95，最大程度保留超高清画质，不再像之前那样妥协压缩
+                image.save(buffered, format="JPEG", quality=95)
+                img_bytes = buffered.getvalue()
+                
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                return f"data:image/jpeg;base64,{b64}"
+            except Exception as e:
+                st.error(f"⚠️ 图片处理异常: {e}")
+                return None
 
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
@@ -155,23 +182,17 @@ else:
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
                 audio_val = True if audio_opt == "生成配套音效/配乐" else False
                 
-                # ==========================================
-                # 终极纯净版：所有素材必须放进 content 数组
-                # 完全丢弃自定义的外部参数
-                # ==========================================
                 api_content = [{"type": "text", "text": prompt}]
                 
                 img_b64_first = encode_image(uploaded_first)
                 img_b64_last = encode_image(uploaded_last)
                 
-                # 添加首帧
                 if img_b64_first:
                     api_content.append({
                         "type": "image_url",
                         "image_url": {"url": img_b64_first},
                         "role": "first_frame"
                     })
-                # 添加尾帧
                 if img_b64_last:
                     api_content.append({
                         "type": "image_url",
@@ -179,7 +200,6 @@ else:
                         "role": "last_frame"
                     })
 
-                # 最干净的官方载荷结构
                 payload = {
                     "model": model_id,
                     "content": api_content,
