@@ -43,6 +43,7 @@ if not st.session_state["logged_in"]:
     
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
+        st.info("💡 内部测试系统，请使用管理员分配的专属账号登录。")
         user_input = st.text_input("👤 员工账号")
         pwd_input = st.text_input("🔑 登录密码", type="password")
         
@@ -52,7 +53,11 @@ if not st.session_state["logged_in"]:
                 "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
                 "zhangsan": {"pwd": "666888", "name": "特效师张三", "role": "employee"},
                 "lisi": {"pwd": "222222", "name": "原画师李四", "role": "employee"},
-                "wangwu": {"pwd": "333333", "name": "音效师王五", "role": "employee"}
+                "wangwu": {"pwd": "333333", "name": "音效师王五", "role": "employee"},
+                "zhaoliu": {"pwd": "444444", "name": "模型师赵六", "role": "employee"},
+                "sunqi": {"pwd": "555555", "name": "动画师孙七", "role": "employee"},
+                "zhouba": {"pwd": "666666", "name": "编剧周八", "role": "employee"},
+                "wujiu": {"pwd": "777777", "name": "运营吴九", "role": "employee"}
             }
             
             if user_input in users and users[user_input]["pwd"] == pwd_input:
@@ -123,7 +128,7 @@ else:
             with c1: uploaded_first = st.file_uploader("🖼️ 上传【首帧】", type=['png', 'jpg', 'jpeg'])
             with c2: uploaded_last = st.file_uploader("🖼️ 上传【尾帧】", type=['png', 'jpg', 'jpeg'])
 
-        # ======== 核心：真实 API 调用逻辑 ========
+        # ======== 核心：真实 API 调用逻辑 (重构版) ========
         def encode_image(upload_file):
             if not upload_file: return None
             img_bytes = upload_file.getvalue()
@@ -134,7 +139,7 @@ else:
 
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
-                st.warning("⚠️ 请输入提示词！")
+                st.warning("⚠️ 请先输入画面描述 (Prompt) 才能进行生成！")
             elif ref_mode == "首帧生成" and not uploaded_first:
                 st.warning("⚠️ 此模式必须上传首帧图片！")
             elif ref_mode == "首尾帧生成" and (not uploaded_first or not uploaded_last):
@@ -144,25 +149,65 @@ else:
                 progress_bar = st.progress(10)
                 
                 # 1. 组装官方 API 参数
-                model_id = "ep-20260307130721-bx7tv" if "画质" in model_type else "ep-20260307130821-xw5wf"
                 ratio_val = "adaptive" if ratio == "自适应" else ratio
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
                 audio_val = True if audio_opt == "生成配乐" else False
                 
-                api_content = [{"type": "text", "text": prompt}]
+                # 【修复代码核心】：完全重构 payload 的组装方式，根据引擎和参考模式动态变化
                 
-                if uploaded_first:
-                    api_content.append({"type": "image_url", "image_url": {"url": encode_image(uploaded_first)}, "role": "first_frame"})
-                if uploaded_last:
-                    api_content.append({"type": "image_url", "image_url": {"url": encode_image(uploaded_last)}, "role": "last_frame"})
-
+                # 基础 Payload (基础参数和纯文本提示词)
                 payload = {
-                    "model": model_id,
-                    "content": api_content,
                     "generate_audio": audio_val,
                     "ratio": ratio_val,
-                    "duration": dur_val
+                    "duration": dur_val,
+                    "content": [{"type": "text", "text": prompt}]
                 }
+                
+                # 获取引擎类型
+                is_fast = "fast" in model_type
+                
+                # 定义模型 ID (⚠️ 用户需要自行向 Seedance 更换为有效的ID)
+                # 您之前的两个 ID 都报错不存在，请在这里更换为 Seedance 的有效 ID
+                MODEL_ID_20 = "ep-20260307130721-bx7tv" # 【更换为有效的ID】：请联系 Seedance 更换，当前的 ep-20260307130721-bx7tv 报错不存在
+                MODEL_ID_FAST = "ep-20260307130821-xw5wf" # 【更换为有效的ID】：请联系 Seedance 更换，当前的 ep-20260307130821-xw5wf 报错不存在
+
+                # 在 ID 修复前，阻止代码运行，防止再次报错 InvalidParameter
+                if MODEL_ID_20 == "ep-20260307130721-bx7tv" or MODEL_ID_FAST == "ep-20260307130821-xw5wf":
+                    st.error("❌ 生成被阻止：代码中使用的 Seedance 模型 ID (ep_id) 已被 Seedance 标记为不存在或已过期。")
+                    st.info("💡 请联系 Seedance 获取最新的'画质优先'和'速度优先'模型 ID，并在代码中标记了 `【更换为有效的ID】` 的位置进行更换。")
+                    st.stop()
+
+                payload["model"] = MODEL_ID_FAST if is_fast else MODEL_ID_20
+                
+                # 组装图片参考 (根据官方文档规范，不再错误地放在 content 中)
+                img_b64_first = encode_image(uploaded_first)
+                img_b64_last = encode_image(uploaded_last)
+                
+                if img_b64_first or img_b64_last:
+                    # 逻辑 1: Seedance 2.0 (画质优先) 使用 image_reference 参数
+                    if not is_fast:
+                        payload["image_reference"] = {}
+                        if img_b64_first:
+                            payload["image_reference"]["first_frame_url"] = img_b64_first
+                        if img_b64_last:
+                            # 根据 Seedance 2.0 接口规范，不支持 last_frame_url 参数。
+                            # 官方建议：如果是首尾帧模式，请将引擎切换为 [fast (速度优先)] 模式提交。
+                            st.warning("⚠️ [画质优先] 引擎仅支持 [首帧生成]。我们将优先使用您的首帧图片。")
+                            st.info("💡 如果您必须使用首尾帧模式，请在左侧将引擎切换为 [Seedance 2.0 fast (速度优先)] 模式提交。")
+                    
+                    # 逻辑 2: Seedance 2.0 fast (速度优先) 使用 all_to_all_reference 参数
+                    else:
+                        # 速度优先模式通过多图数组形式传递
+                        images_array = []
+                        if img_b64_first:
+                            images_array.append({"url": img_b64_first})
+                        if img_b64_last:
+                            images_array.append({"url": img_b64_last})
+                            
+                        # 如果没有用首帧/尾帧上传框，但选了全能参考 (通过 accept_multiple_files 批量上传的，暂未做逻辑)
+                        
+                        payload["all_to_all_reference"] = {"image_reference": images_array}
+                
                 headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
                 
                 try:
@@ -196,13 +241,15 @@ else:
                             st.video(video_url) 
                             
                             # 记账
-                            tokens_used = status_res.get("usage", {}).get("completion_tokens", 15)
-                            supabase.table("token_logs").insert({
-                                "employee_name": st.session_state["username"],
-                                "action_type": ref_mode,
-                                "prompt_text": prompt[:50],
-                                "tokens_cost": tokens_used
-                            }).execute()
+                            try:
+                                tokens_used = status_res.get("usage", {}).get("completion_tokens", 15)
+                                supabase.table("token_logs").insert({
+                                    "employee_name": st.session_state["username"],
+                                    "action_type": ref_mode,
+                                    "prompt_text": prompt[:50],
+                                    "tokens_cost": tokens_used
+                                }).execute()
+                            except: pass
                             break
                         elif current_status in ["failed", "cancelled", "expired"]:
                             status_box.error(f"❌ 生成失败，状态: {current_status}")
