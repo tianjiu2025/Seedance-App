@@ -80,22 +80,6 @@ if st.session_state["role"] == "admin":
 # ================= 5. 员工真实创作台 =================
 else:
     st.markdown("## 🎬 魔方国际影业 - Seedance 2.0 视频生成台")
-    
-    with st.expander("📖 必读：素材提交规则 (V1.0 精炼版)", expanded=False):
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            st.markdown("""
-            **【角色图片要求】**
-            * 仿真人为主，特征清晰。单个角色**最多3张图**（正/侧/背）。
-            * **严禁**上传名人肖像（涉敏无法通过）。
-            """)
-        with col_r2:
-            st.markdown("""
-            **【文件与命名要求】**
-            * jpeg, png, heic 等。长宽比 0.4~2.5。单张<30MB。
-            * **⚠️ 命名必须干净**：只能包含中文、字母、数字、`_`、`-`。
-            * **严禁包含空格及其他符号！**。
-            """)
 
     with st.container(border=True):
         prompt = st.text_area(
@@ -118,42 +102,58 @@ else:
             
         st.write("---")
         
+        # ==========================================
+        # 核心突破：提供直接输入 URL 的选项，完全避开 Base64
+        # ==========================================
+        allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
+        
+        first_url = ""
+        last_url = ""
         uploaded_first = None
         uploaded_last = None
-        allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
 
         if ref_mode == "首帧生成":
-            uploaded_first = st.file_uploader("🖼️ 上传参考【首帧】图", type=allowed_types)
+            first_url = st.text_input("🌐 粘贴【首帧】网络图片链接 (强烈推荐！可直接避开大文件报错)")
+            st.markdown("---")
+            uploaded_first = st.file_uploader("🖼️ 或上传本地参考图 (若出现 InvalidParameter 请改用上方链接)", type=allowed_types)
+            
         elif ref_mode == "首尾帧生成":
             c1, c2 = st.columns(2)
-            with c1: uploaded_first = st.file_uploader("🖼️ 上传参考【首帧】图", type=allowed_types)
-            with c2: uploaded_last = st.file_uploader("🖼️ 上传参考【尾帧】图", type=allowed_types)
+            with c1: 
+                first_url = st.text_input("🌐 粘贴【首帧】网络链接")
+                uploaded_first = st.file_uploader("🖼️ 或上传本地【首帧】", type=allowed_types)
+            with c2:
+                last_url = st.text_input("🌐 粘贴【尾帧】网络链接")
+                uploaded_last = st.file_uploader("🖼️ 或上传本地【尾帧】", type=allowed_types)
 
-        # ==========================================
-        # 核心拨乱反正：放弃一切自作聪明的压缩，直接读取原始字节！
-        # ==========================================
-        def encode_image(upload_file):
-            if not upload_file: return None
-            # 提取真实格式名称
-            ext = upload_file.name.split('.')[-1].lower()
-            if ext == 'jpg': ext = 'jpeg'
-            
-            # 绝对不碰图片的内部像素，直接读取最原始的二进制流
-            img_bytes = upload_file.getvalue()
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            
-            # 拼接成最标准的官方格式头 [cite: 46]
-            return f"data:image/{ext};base64,{b64}"
+        def get_image_url(url_input, upload_file):
+            # 如果你填了网络链接，优先使用网络链接，绝对不会报错！
+            if url_input and url_input.strip() != "":
+                return url_input.strip()
+            # 如果没填链接但传了图片，使用原生 Base64 (不加任何压缩)
+            if upload_file:
+                ext = upload_file.name.split('.')[-1].lower()
+                if ext == 'jpg': ext = 'jpeg'
+                img_bytes = upload_file.getvalue()
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                return f"data:image/{ext};base64,{b64}"
+            return None
 
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
                 st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
-            elif ref_mode == "首帧生成" and not uploaded_first:
-                st.warning("⚠️ 此模式必须上传首帧图片！")
-            elif ref_mode == "首尾帧生成" and (not uploaded_first or not uploaded_last):
-                st.warning("⚠️ 此模式必须上传首尾两张图片！")
             else:
-                status_box = st.info("⏳ 正在直接打包原始数据，请求云端引擎...")
+                img_url_first = get_image_url(first_url, uploaded_first)
+                img_url_last = get_image_url(last_url, uploaded_last)
+
+                if ref_mode == "首帧生成" and not img_url_first:
+                    st.warning("⚠️ 请粘贴首帧图片链接或上传本地图片！")
+                    st.stop()
+                elif ref_mode == "首尾帧生成" and (not img_url_first or not img_url_last):
+                    st.warning("⚠️ 请确保首尾两张图片的链接或文件都已提供！")
+                    st.stop()
+
+                status_box = st.info("⏳ 正在组装原生请求体，直接投递给云端引擎...")
                 progress_bar = st.progress(10)
                 
                 is_fast = "fast" in model_type
@@ -163,21 +163,19 @@ else:
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
                 audio_val = True if audio_opt == "生成配套音效/配乐" else False
                 
+                # 100% 还原你成功的 POST 脚本结构
                 api_content = [{"type": "text", "text": prompt}]
                 
-                img_b64_first = encode_image(uploaded_first)
-                img_b64_last = encode_image(uploaded_last)
-                
-                if img_b64_first:
+                if img_url_first:
                     api_content.append({
                         "type": "image_url",
-                        "image_url": {"url": img_b64_first},
+                        "image_url": {"url": img_url_first},
                         "role": "first_frame"
                     })
-                if img_b64_last:
+                if img_url_last:
                     api_content.append({
                         "type": "image_url",
-                        "image_url": {"url": img_b64_last},
+                        "image_url": {"url": img_url_last},
                         "role": "last_frame"
                     })
 
@@ -204,7 +202,7 @@ else:
                         log_api_error(f"❌ 任务投递失败（API无ID）：{create_res_json}")
                         st.stop()
                         
-                    status_box.info(f"✅ 任务投递成功！任务ID: {task_id}。正在排队渲染，请耐心等待...")
+                    status_box.info(f"✅ 任务投递成功！任务ID: {task_id}。引擎接收无误，正在渲染中...")
                     progress_bar.progress(30)
                     
                     retry_count = 0
