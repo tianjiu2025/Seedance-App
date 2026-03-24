@@ -132,7 +132,7 @@ else:
             with c2: uploaded_last = st.file_uploader("🖼️ 上传参考【尾帧】图", type=allowed_types)
 
         # ==========================================
-        # 核心修复：尊重原图画质，严格遵循文档物理上限
+        # 核心突破：平衡 2K 超清画质与 Base64 传输限制
         # ==========================================
         def encode_image(upload_file):
             if not upload_file: return None
@@ -141,21 +141,20 @@ else:
                 if image.mode in ("RGBA", "P"):
                     image = image.convert("RGB")
                 
-                # 检查1：宽高比防呆预警 (官方限制 0.4 ~ 2.5)
+                # 防呆预警 (官方限制比例 0.4 ~ 2.5)
                 width, height = image.size
                 aspect_ratio = width / height
                 if aspect_ratio < 0.4 or aspect_ratio > 2.5:
-                    st.warning(f"⚠️ 您的图片比例为 {aspect_ratio:.2f}，超出了引擎允许的 (0.4 ~ 2.5) 范围。如果提交失败，请先对图片进行裁切！")
+                    st.warning(f"⚠️ 图片比例 {aspect_ratio:.2f} 超出 (0.4 ~ 2.5) 范围，可能会被引擎拒绝！")
 
-                # 检查2：逼近官方允许的最高画质极限 (长边不超过 6000 px)
-                # 使用 5990 留出安全冗余
-                max_size = 5990
+                # 【终极优化】：设定为 2560 像素（2K级别人像极限清晰度）
+                # 保证图片极度清晰，同时将体积控制在 1MB 左右，完美绕过"大文件请勿使用 Base64"的限制！
+                max_size = 2560
                 if max(image.size) > max_size:
                     image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
                     
                 buffered = io.BytesIO()
-                # 质量设置为 95，最大程度保留超高清画质，不再像之前那样妥协压缩
-                image.save(buffered, format="JPEG", quality=95)
+                image.save(buffered, format="JPEG", quality=90)
                 img_bytes = buffered.getvalue()
                 
                 b64 = base64.b64encode(img_bytes).decode("utf-8")
@@ -172,7 +171,7 @@ else:
             elif ref_mode == "首尾帧生成" and (not uploaded_first or not uploaded_last):
                 st.warning("⚠️ 此模式必须上传首尾两张图片！")
             else:
-                status_box = st.info("⏳ 正在打包数据，请求云端引擎...")
+                status_box = st.info("⏳ 正在打包并压缩数据，请求云端引擎...")
                 progress_bar = st.progress(10)
                 
                 is_fast = "fast" in model_type
@@ -200,6 +199,7 @@ else:
                         "role": "last_frame"
                     })
 
+                # 最干净的官方载荷结构
                 payload = {
                     "model": model_id,
                     "content": api_content,
