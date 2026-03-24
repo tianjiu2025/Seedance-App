@@ -49,7 +49,6 @@ if not st.session_state["logged_in"]:
         pwd_input = st.text_input("🔑 登录密码", type="password")
         
         if st.button("🚀 登录系统", use_container_width=True):
-            # 已经为你完整导入 TXT 中的真实账号
             users = {
                 "admin": {"pwd": "888888", "name": "天九老板", "role": "admin"},
                 "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
@@ -161,21 +160,15 @@ else:
                 status_box = st.info("⏳ 正在打包数据，请求云端引擎...")
                 progress_bar = st.progress(10)
                 
-                # 【请在这里填入你从 Seedance 获取的最新有效模型 ID】
-                MODEL_ID_20 = "ep-20260307130721-bx7tv" 
-                MODEL_ID_FAST = "ep-20260307130821-xw5wf" 
-                
-                if MODEL_ID_20 == "ep-20260307130721-bx7tv" or MODEL_ID_FAST == "ep-20260307130821-xw5wf":
-                    st.error("❌ 生成被阻止：代码中使用的模型 ID 还是旧的报错 ID。")
-                    st.info("💡 请务必联系 Seedance 获取最新的模型 ID，并在代码大约 180 行左右的位置进行替换！")
-                    st.stop()
-
                 is_fast = "fast" in model_type
-                model_id = MODEL_ID_FAST if is_fast else MODEL_ID_20
+                # 直接使用官方文档提供的正确 ID
+                model_id = "ep-20260307130821-xw5wf" if is_fast else "ep-20260307130721-bx7tv"
+                
                 ratio_val = "adaptive" if ratio == "自适应" else ratio
                 dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
                 audio_val = True if audio_opt == "生成配套音效/配乐" else False
                 
+                # API V2.5 规范：基本参数与 content 并列
                 payload = {
                     "model": model_id,
                     "content": [{"type": "text", "text": prompt}],
@@ -189,11 +182,13 @@ else:
                 
                 if img_b64_first or img_b64_last:
                     if not is_fast:
+                        # 画质优先引擎：使用 image_reference
                         img_ref = {}
                         if img_b64_first: img_ref["first_frame_url"] = img_b64_first
                         if img_b64_last: img_ref["last_frame_url"] = img_b64_last
                         payload["image_reference"] = img_ref
                     else:
+                        # 速度优先引擎：使用 all_to_all_reference
                         images_array = []
                         if img_b64_first: images_array.append({"url": img_b64_first})
                         if img_b64_last: images_array.append({"url": img_b64_last})
@@ -254,9 +249,6 @@ else:
                             elif current_status in ["failed", "cancelled", "expired"]:
                                 log_api_error(f"❌ 生成失败，状态: {current_status}")
                                 break
-                        # ==========================================
-                        # 重点修复在这里：加上了空格！
-                        # ==========================================
                         except Exception as poll_e:
                             log_api_error(f"⚠️ 轮询过程出现异常，系统正在自动重试: {poll_e}")
                             
