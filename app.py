@@ -1,158 +1,101 @@
 import streamlit as st
 import requests
 import time
-import base64
-import re
-import os
+from supabase import create_client, Client
 
-# --- 预设您的专属信息 ---
-DEFAULT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNWEzZGQ1YzMwN2RiNDZhYjg0ZWJmMmUyOWYzM2Y4MTUiLCJleHAiOjIwODk2ODQ2MDl9.Ntc07jo1pWGljztVuO72SsPpNOrKytVglVmbMTejYSg"
+# ================= 1. 核心配置区 =================
+# Supabase 数据库配置 (你刚才获取的两把钥匙)
+SUPABASE_URL = "https://ssxjafljgqwlymorinih.supabase.co"
+SUPABASE_KEY = "sb_publishable_N_UOY1kXcOwd0cbVSB9d2w_Y2ogoSEv"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="魔方国际影业 - AI视频生成台", layout="wide")
-st.title("🎬 魔方国际影业 - Seedance 2.0 创作站")
+# Seedance API 配置 (请在这里填入你的真实 Token)
+SEEDANCE_API_TOKEN = "在这里填入你那一长串eyJ开头的Token"
 
-# --- 侧边栏：配置中心 ---
-st.sidebar.header("🔑 系统配置")
-api_key = st.sidebar.text_input("API Token (已自动填充)", value=DEFAULT_TOKEN, type="password")
-model_id = st.sidebar.selectbox("选择模型引擎", [
-    "ep-20260307130721-bx7tv", # Seedance 2.0 (高品质)
-    "ep-20260307130821-xw5wf"  # Seedance 2.0 fast (快速)
-])
+# ================= 2. 登录拦截系统 =================
+# 初始化登录状态
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+    st.session_state["username"] = ""
+    st.session_state["role"] = ""
 
-# --- 验证函数：严格遵守素材提交规则1.0 ---
-def validate_filename(filename):
-    """检查文件名是否只包含中文、字母、数字、下划线、短横线，且最多12字"""
-    name_without_ext = os.path.splitext(filename)[0]
-    if len(name_without_ext) > 12:
-        return False, f"文件名 '{name_without_ext}' 超过12个字符"
-    if not re.match(r'^[\u4e00-\u9fa5a-zA-Z0-9_-]+$', name_without_ext):
-        return False, f"文件名 '{name_without_ext}' 包含违规字符（禁止空格或特殊符号）"
-    return True, ""
-
-# --- 主界面 ---
-col1, col2 = st.columns([1.5, 1])
-
-with col1:
-    st.subheader("📝 创作面板")
-    # 巧妙结合您的创作场景作为默认提示词
-    prompt = st.text_area(
-        "视频分镜提示词 (Prompt)", 
-        value="一身白衣的陆妄川站在洗灵池畔，周身灵气环绕，眼神冷峻地凝视前方。水面泛起阵阵涟漪，镜头缓缓推进，展现出极高的电影质感。",
-        height=100
-    )
+# 如果没登录，就显示登录框
+if not st.session_state["logged_in"]:
+    st.markdown("<h2 style='text-align: center;'>🔐 魔方国际影业 - 内部系统</h2>", unsafe_allow_html=True)
+    st.write("---")
     
-    st.markdown("#### 🖼️ 角色参考图上传 (严格遵守 V1.0 规则)")
-    st.caption("要求：最多3张（正/侧/背），清晰展示面部，无多余配饰。大小<30MB。文件名限12字内且无特殊字符。")
-    
-    uploaded_files = st.file_uploader(
-        "选择图片文件", 
-        type=['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif', 'heic'], 
-        accept_multiple_files=True
-    )
-
-    with st.expander("⚙️ 画面高级设置"):
-        ratio = st.selectbox("画面宽高比", ["16:9", "9:16", "21:9", "4:3", "1:1", "adaptive"])
-        duration = st.slider("视频时长 (秒)", 4, 15, 5)
-        generate_audio = st.checkbox("生成配套音效/配乐", value=True)
-
-with col2:
-    st.subheader("📺 监视器")
-    status_area = st.empty()
-    video_area = st.empty()
-
-# --- 核心处理逻辑 ---
-if st.button("🚀 提交生成任务", use_container_width=True):
-    if not api_key:
-        st.error("缺少 API Token！")
-        st.stop()
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        user_input = st.text_input("员工账号")
+        pwd_input = st.text_input("登录密码", type="password")
         
-    if uploaded_files and len(uploaded_files) > 3:
-        st.error("【规则拦截】上传失败：单个角色图片不能超过3张！")
-        st.stop()
+        if st.button("登录系统", use_container_width=True):
+            # 身份判断逻辑
+            if user_input == "admin" and pwd_input == "888888":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "天九老板"
+                st.session_state["role"] = "admin"
+                st.rerun()
+            elif user_input == "yuangong1" and pwd_input == "123456":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "剪辑师小王"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            else:
+                st.error("账号或密码错误，请联系管理员！")
+    st.stop() # 拦截器：没登录的人运行到这里就停止了，看不到下面的代码
 
-    content_list = [{"type": "text", "text": prompt}]
+# ================= 3. 登录后的侧边栏 =================
+st.sidebar.title(f"👤 欢迎, {st.session_state['username']}")
+st.sidebar.write(f"当前身份: {'超级管理员' if st.session_state['role'] == 'admin' else '内部员工'}")
+st.sidebar.write("---")
+if st.sidebar.button("退出登录"):
+    st.session_state["logged_in"] = False
+    st.rerun()
+
+# ================= 4. 老板专属后台 (仅 Admin 可见) =================
+if st.session_state["role"] == "admin":
+    st.title("📊 魔方国际影业 - 财务与算力后台")
+    st.write("这里记录了所有员工消耗的 Token 数据。")
     
-    # 处理上传的图片并转换为 Base64
-    for i, file in enumerate(uploaded_files):
-        # 1. 验证文件大小 (<30MB)
-        if file.size > 30 * 1024 * 1024:
-            st.error(f"【规则拦截】文件 {file.name} 超过30MB！")
-            st.stop()
-            
-        # 2. 验证文件名
-        is_valid, error_msg = validate_filename(file.name)
-        if not is_valid:
-            st.error(f"【规则拦截】{error_msg}")
-            st.stop()
-            
-        # 3. 转换为 Base64 格式
-        file_ext = file.name.split('.')[-1].lower()
-        if file_ext == 'jpg': file_ext = 'jpeg'
-        encoded_string = base64.b64encode(file.read()).decode('utf-8')
-        base64_data = f"data:image/{file_ext};base64,{encoded_string}"
-        
-        # 4. 分配 Role (首尾帧逻辑)
-        role = "reference_image"
-        if len(uploaded_files) == 1:
-            role = "first_frame"
-        elif len(uploaded_files) == 2:
-            role = "first_frame" if i == 0 else "last_frame"
-            
-        content_list.append({
-            "type": "image_url",
-            "image_url": {"url": base64_data},
-            "role": role
-        })
-
-    # 构建请求体
-    payload = {
-        "model": model_id,
-        "content": content_list,
-        "ratio": ratio,
-        "duration": duration,
-        "generate_audio": generate_audio
-    }
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-
+    # 从 Supabase 拉取数据
     try:
-        with st.spinner("正在向云端提交场记板..."):
-            resp = requests.post("http://118.196.64.1/api/v1/doubao/create", json=payload, headers=headers)
-            result = resp.json()
-            
-        if "id" in result:
-            task_id = result["id"]
-            status_area.info(f"任务已接收！流水号: {task_id}")
-            
-            # 轮询查询结果
-            progress_bar = st.progress(0)
-            while True:
-                check_resp = requests.post(
-                    "http://118.196.64.1/api/v1/doubao/get_result", 
-                    json={"id": task_id}, 
-                    headers=headers
-                )
-                status_data = check_resp.json()
-                status = status_data.get("status")
-                
-                if status == "succeeded":
-                    progress_bar.progress(100)
-                    video_url = status_data["content"]["video_url"]
-                    status_area.success("渲染完成！")
-                    video_area.video(video_url)
-                    st.balloons()
-                    break
-                elif status == "failed":
-                    status_area.error(f"渲染失败：{status_data.get('error', {}).get('message')}")
-                    break
-                else:
-                    status_area.warning(f"云端渲染中，当前状态：{status}... (请勿刷新页面)")
-                    time.sleep(8) # 每 8 秒查询一次
+        response = supabase.table("token_logs").select("*").order("created_at", desc=True).execute()
+        logs = response.data
+        if logs:
+            st.dataframe(logs, use_container_width=True)
         else:
-            status_area.error(f"接口拒绝提交：{result}")
-            
+            st.info("目前还没有员工生成记录。")
     except Exception as e:
-        status_area.error(f"网络通信发生错误：{e}")
+        st.error(f"连接数据库失败，请检查配置: {e}")
+
+# ================= 5. 员工创作台 (Admin 和 员工均可见) =================
+else:
+    st.title("🎬 魔方国际影业 - Seedance 2.0 创作站")
+    
+    st.subheader("📝 创作面板")
+    prompt = st.text_area("视频分镜提示词 (Prompt)", placeholder="例如：陆妄川站在洗灵池旁，剑气纵横...")
+    uploaded_file = st.file_uploader("🖼️ 角色参考图上传 (严格遵守 V1.0 规则)", type=['png', 'jpg', 'jpeg'])
+    
+    st.write("---")
+    if st.button("🚀 提交生成任务", use_container_width=True):
+        if not prompt:
+            st.warning("⚠️ 必须输入提示词才能生成！")
+        else:
+            with st.spinner("正在调用 Seedance 引擎，请稍候..."):
+                # 这里未来可以替换为真实的 Seedance API 请求代码
+                time.sleep(2) # 模拟生成等待时间
+                
+                # ======== 核心：生成完毕后，自动记账 ========
+                try:
+                    # 假设每次生成消耗 15 Token
+                    supabase.table("token_logs").insert({
+                        "employee_name": st.session_state["username"],
+                        "action_type": "长生劫分镜生成",
+                        "prompt_text": prompt,
+                        "tokens_cost": 15
+                    }).execute()
+                    
+                    st.success("🎉 视频生成任务已提交！Token 消耗已自动记录。")
+                except Exception as e:
+                    st.error(f"账本记录失败: {e}")
