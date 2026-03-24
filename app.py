@@ -2,8 +2,6 @@ import streamlit as st
 import time
 import requests
 import base64
-import io
-from PIL import Image
 from supabase import create_client, Client
 
 # ================= 1. 核心配置与 API 密钥 =================
@@ -132,36 +130,20 @@ else:
             with c2: uploaded_last = st.file_uploader("🖼️ 上传参考【尾帧】图", type=allowed_types)
 
         # ==========================================
-        # 终极铁血压缩机制：彻底终结 Base64 长度报警
+        # 核心拨乱反正：放弃一切自作聪明的压缩，直接读取原始字节！
         # ==========================================
         def encode_image(upload_file):
             if not upload_file: return None
-            try:
-                image = Image.open(upload_file)
-                if image.mode in ("RGBA", "P"):
-                    image = image.convert("RGB")
-                
-                width, height = image.size
-                aspect_ratio = width / height
-                if aspect_ratio < 0.4 or aspect_ratio > 2.5:
-                    st.warning(f"⚠️ 图片比例 {aspect_ratio:.2f} 超出 (0.4 ~ 2.5) 范围，可能会被引擎拒绝！")
-
-                # 【绝对红线】：强制对齐引擎输出天花板 (720p = 1280像素)
-                # 这能保证 Base64 字符串绝对不会超长，同时不损失最终生成的任何画质！
-                max_size = 1280
-                if max(image.size) > max_size:
-                    image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                    
-                buffered = io.BytesIO()
-                image.save(buffered, format="JPEG", quality=80)
-                img_bytes = buffered.getvalue()
-                
-                # 抹除任何可能导致解析失败的回车换行符
-                b64 = base64.b64encode(img_bytes).decode("utf-8").replace('\n', '').replace('\r', '')
-                return f"data:image/jpeg;base64,{b64}"
-            except Exception as e:
-                st.error(f"⚠️ 图片处理异常: {e}")
-                return None
+            # 提取真实格式名称
+            ext = upload_file.name.split('.')[-1].lower()
+            if ext == 'jpg': ext = 'jpeg'
+            
+            # 绝对不碰图片的内部像素，直接读取最原始的二进制流
+            img_bytes = upload_file.getvalue()
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
+            
+            # 拼接成最标准的官方格式头 [cite: 46]
+            return f"data:image/{ext};base64,{b64}"
 
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
@@ -171,7 +153,7 @@ else:
             elif ref_mode == "首尾帧生成" and (not uploaded_first or not uploaded_last):
                 st.warning("⚠️ 此模式必须上传首尾两张图片！")
             else:
-                status_box = st.info("⏳ 正在打包并极致压缩数据，请求云端引擎...")
+                status_box = st.info("⏳ 正在直接打包原始数据，请求云端引擎...")
                 progress_bar = st.progress(10)
                 
                 is_fast = "fast" in model_type
