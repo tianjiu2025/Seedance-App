@@ -4,13 +4,13 @@ import time
 from supabase import create_client, Client
 
 # ================= 1. 核心配置区 =================
-# Supabase 数据库配置 (你刚才获取的两把钥匙)
-SUPABASE_URL = "https://ssxjafljgqwlymorinih.supabase.co"
-SUPABASE_KEY = "sb_publishable_N_UOY1kXcOwd0cbVSB9d2w_Y2ogoSEv"
+# 从 Streamlit 保险箱读取钥匙 (绝对安全，代码里不再有明文密码)
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Seedance API 配置 (请在这里填入你的真实 Token)
-SEEDANCE_API_TOKEN = "在这里填入你那一长串eyJ开头的Token"
+# Seedance API Token 也从保险箱读取
+SEEDANCE_API_TOKEN = st.secrets["SEEDANCE_API_TOKEN"]
 
 # ================= 2. 登录拦截系统 =================
 # 初始化登录状态
@@ -39,6 +39,11 @@ if not st.session_state["logged_in"]:
             elif user_input == "yuangong1" and pwd_input == "123456":
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = "剪辑师小王"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "zhangsan" and pwd_input == "666888":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "特效师张三"
                 st.session_state["role"] = "employee"
                 st.rerun()
             else:
@@ -83,8 +88,8 @@ else:
             st.warning("⚠️ 必须输入提示词才能生成！")
         else:
             with st.spinner("正在调用 Seedance 引擎，请稍候..."):
-                # 这里未来可以替换为真实的 Seedance API 请求代码
-                time.sleep(2) # 模拟生成等待时间
+                # 这里是模拟 API 请求等待时间
+                time.sleep(2) 
                 
                 # ======== 核心：生成完毕后，自动记账 ========
                 try:
