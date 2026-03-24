@@ -1,5 +1,4 @@
 import streamlit as st
-import requests
 import time
 from supabase import create_client, Client
 
@@ -9,7 +8,6 @@ SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Seedance API Token 也从保险箱读取
 SEEDANCE_API_TOKEN = st.secrets["SEEDANCE_API_TOKEN"]
 
 # ================= 2. 登录拦截系统 =================
@@ -30,7 +28,7 @@ if not st.session_state["logged_in"]:
         pwd_input = st.text_input("登录密码", type="password")
         
         if st.button("登录系统", use_container_width=True):
-            # 身份判断逻辑
+            # ================= 身份判断逻辑 =================
             if user_input == "admin" and pwd_input == "888888":
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = "天九老板"
@@ -46,9 +44,39 @@ if not st.session_state["logged_in"]:
                 st.session_state["username"] = "特效师张三"
                 st.session_state["role"] = "employee"
                 st.rerun()
+            elif user_input == "lisi" and pwd_input == "222222":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "原画师李四"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "wangwu" and pwd_input == "333333":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "音效师王五"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "zhaoliu" and pwd_input == "444444":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "模型师赵六"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "sunqi" and pwd_input == "555555":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "动画师孙七"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "zhouba" and pwd_input == "666666":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "编剧周八"
+                st.session_state["role"] = "employee"
+                st.rerun()
+            elif user_input == "wujiu" and pwd_input == "777777":
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = "运营吴九"
+                st.session_state["role"] = "employee"
+                st.rerun()
             else:
                 st.error("账号或密码错误，请联系管理员！")
-    st.stop() # 拦截器：没登录的人运行到这里就停止了，看不到下面的代码
+    st.stop() # 拦截器：没登录的人运行到这里就停止了
 
 # ================= 3. 登录后的侧边栏 =================
 st.sidebar.title(f"👤 欢迎, {st.session_state['username']}")
@@ -79,28 +107,55 @@ else:
     st.title("🎬 魔方国际影业 - Seedance 2.0 创作站")
     
     st.subheader("📝 创作面板")
-    prompt = st.text_area("视频分镜提示词 (Prompt)", placeholder="例如：陆妄川站在洗灵池旁，剑气纵横...")
-    uploaded_file = st.file_uploader("🖼️ 角色参考图上传 (严格遵守 V1.0 规则)", type=['png', 'jpg', 'jpeg'])
+    prompt = st.text_area(
+        "视频分镜提示词 (Prompt)", 
+        placeholder="例如：陆妄川与江月白在洗灵池旁对峙，仙气缭绕，剑拔弩张..."
+    )
+    uploaded_file = st.file_uploader("🖼️ 角色参考图上传 (最高 4K 分辨率，无多余配饰)", type=['png', 'jpg', 'jpeg'])
     
     st.write("---")
+    
+    # 点击生成按钮后的逻辑
     if st.button("🚀 提交生成任务", use_container_width=True):
         if not prompt:
-            st.warning("⚠️ 必须输入提示词才能生成！")
+            st.warning("⚠️ 必须输入提示词才能生成视频！")
         else:
-            with st.spinner("正在调用 Seedance 引擎，请稍候..."):
-                # 这里是模拟 API 请求等待时间
-                time.sleep(2) 
-                
-                # ======== 核心：生成完毕后，自动记账 ========
-                try:
-                    # 假设每次生成消耗 15 Token
-                    supabase.table("token_logs").insert({
-                        "employee_name": st.session_state["username"],
-                        "action_type": "长生劫分镜生成",
-                        "prompt_text": prompt,
-                        "tokens_cost": 15
-                    }).execute()
-                    
-                    st.success("🎉 视频生成任务已提交！Token 消耗已自动记录。")
-                except Exception as e:
-                    st.error(f"账本记录失败: {e}")
+            # === 所见即所得：动态进度条展示 ===
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            status_text.text("⏳ 正在连接 Seedance 引擎...")
+            time.sleep(1)
+            progress_bar.progress(30)
+            
+            status_text.text("⚙️ 正在解析提示词与角色参考图...")
+            time.sleep(1.5)
+            progress_bar.progress(60)
+            
+            status_text.text("🎨 正在渲染分镜画面...")
+            time.sleep(1.5)
+            progress_bar.progress(90)
+            
+            status_text.text("🎞️ 正在合成最终视频序列...")
+            time.sleep(1)
+            progress_bar.progress(100)
+            
+            status_text.empty() # 清除状态文字
+            
+            # === 结果展示区 ===
+            st.success("🎉 视频生成成功！(当前为演示播放器，待接入真实 API 后将显示实际视频)")
+            
+            # 这是一个开源的占位测试视频，让员工看到真实的播放器界面
+            st.video("https://www.w3schools.com/html/mov_bbb.mp4")
+            
+            # === 后台自动记账 ===
+            try:
+                # 假设每次生成消耗 15 Token
+                supabase.table("token_logs").insert({
+                    "employee_name": st.session_state["username"],
+                    "action_type": "分镜视频生成",
+                    "prompt_text": prompt,
+                    "tokens_cost": 15
+                }).execute()
+            except Exception as e:
+                st.error(f"账本记录失败: {e}")
