@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import requests
-import base64
+import uuid
 from supabase import create_client, Client
 
 # ================= 1. 核心配置与 API 密钥 =================
@@ -41,7 +41,14 @@ if not st.session_state["logged_in"]:
         if st.button("🚀 登录系统", use_container_width=True):
             users = {
                 "admin": {"pwd": "888888", "name": "天九老板", "role": "admin"},
-                "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"}
+                "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
+                "zhangsan": {"pwd": "666888", "name": "特效师张三", "role": "employee"},
+                "lisi": {"pwd": "222222", "name": "原画师李四", "role": "employee"},
+                "wangwu": {"pwd": "333333", "name": "音效师王五", "role": "employee"},
+                "zhaoliu": {"pwd": "444444", "name": "模型师赵六", "role": "employee"},
+                "sunqi": {"pwd": "555555", "name": "动画师孙七", "role": "employee"},
+                "zhouba": {"pwd": "666666", "name": "编剧周八", "role": "employee"},
+                "wujiu": {"pwd": "777777", "name": "运营吴九", "role": "employee"}
             }
             
             if user_input in users and users[user_input]["pwd"] == pwd_input:
@@ -77,18 +84,17 @@ else:
     with st.container(border=True):
         prompt = st.text_area(
             "📝 画面描述 (Prompt)", 
-            height=150, 
-            placeholder="请在此输入详细的视频分镜描述...\n例如：镜头从远景拉近，陆妄川与江月白在洗灵池旁对峙。仙气缭绕，剑拔弩张..."
+            height=200, 
+            placeholder="请在此输入详细的分镜描述...\n【多模态提示】：如果同时上传了角色和分镜，请在提示词中明确指定，例如：“图片1为角色参考，图片2作为视频首帧。镜头从远景拉近...”"
         )
         
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            # 核心更新 1：严格对齐 API 场景的模式分类
+            # 完美适配官方互斥规则的 3 种模式
             ref_mode = st.selectbox("🎯 模式", [
-                "文生视频 (纯文本)", 
-                "多模态参考 (文+参考图)", 
-                "图生视频 (首帧)", 
-                "图生视频 (首尾帧)"
+                "1. 首帧生视频 (仅需1张图)", 
+                "2. 首尾帧生视频 (仅需2张图)", 
+                "3. 多模态参考 (推荐! 角色+分镜)"
             ])
         with col2:
             model_type = st.selectbox("⚙️ 引擎", ["Seedance 2.0 (画质优先)", "Seedance 2.0 fast (速度优先)"])
@@ -101,96 +107,141 @@ else:
             
         st.write("---")
         
-        # ==========================================
-        # 核心更新 2：规范化图片上传与 Base64 转换逻辑
-        # ==========================================
         allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
         
-        def process_image_to_payload(url_input, upload_file, role):
-            """将图片输入转换为 API 要求的字典格式"""
-            if url_input and url_input.strip():
-                return {"type": "image_url", "image_url": {"url": url_input.strip()}, "role": role}
-            
-            if upload_file:
-                # 检查单张图片大小 (文档要求 < 30MB)
-                if upload_file.size > 30 * 1024 * 1024:
-                    st.error(f"图片 {upload_file.name} 超过 30MB 限制！请压缩后重试。")
-                    st.stop()
-                    
-                ext = upload_file.name.split('.')[-1].lower()
-                if ext == 'jpg': ext = 'jpeg'
-                img_bytes = upload_file.getvalue()
-                b64 = base64.b64encode(img_bytes).decode("utf-8")
-                base64_url = f"data:image/{ext};base64,{b64}"
-                return {"type": "image_url", "image_url": {"url": base64_url}, "role": role}
-            
-            return None
+        # UI 变量初始化
+        asset_input_1 = ""
+        asset_input_2 = ""
+        multi_assets = ""
+        uploaded_file_1 = None
+        uploaded_file_2 = None
+        multi_uploads = []
 
-        # 用于存储最终要发送给大模型的 content 列表
-        api_content = []
-        if prompt.strip():
-            api_content.append({"type": "text", "text": prompt.strip()})
+        # 根据不同模式，展示最符合逻辑的输入框
+        if ref_mode == "1. 首帧生视频 (仅需1张图)":
+            st.info("💡 此模式下，您可以填入官方角色 Asset ID，或者上传一张本地分镜图。")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                asset_input_1 = st.text_input("🎭 填入官方 Asset ID (例如: asset-xxx)")
+            with col_b:
+                uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】(自动存入图床)", type=allowed_types)
 
-        # 根据不同模式，动态渲染上传组件
-        if ref_mode == "多模态参考 (文+参考图)":
-            st.info("💡 多模态参考：您可以上传 1~9 张参考图片，模型会提取图片风格和元素。提示词是必填项。")
-            ref_urls = st.text_input("🌐 网络参考图链接 (多个链接请用逗号英文 ',' 隔开)")
-            ref_files = st.file_uploader("🖼️ 或上传本地参考图 (最多9张)", type=allowed_types, accept_multiple_files=True)
-            
-            # 处理多图逻辑
-            if ref_urls:
-                for url in ref_urls.split(','):
-                    if url.strip():
-                        api_content.append(process_image_to_payload(url.strip(), None, "reference_image"))
-            if ref_files:
-                for f in ref_files[:9]: # 强制截断最多9张
-                    api_content.append(process_image_to_payload(None, f, "reference_image"))
-
-        elif ref_mode == "图生视频 (首帧)":
-            first_url = st.text_input("🌐 粘贴【首帧】网络图片链接")
-            uploaded_first = st.file_uploader("🖼️ 或上传本地【首帧】参考图", type=allowed_types)
-            img_payload = process_image_to_payload(first_url, uploaded_first, "first_frame")
-            if img_payload:
-                api_content.append(img_payload)
-
-        elif ref_mode == "图生视频 (首尾帧)":
+        elif ref_mode == "2. 首尾帧生视频 (仅需2张图)":
+            st.info("💡 此模式专用于严格控制起始和结束画面。")
             c1, c2 = st.columns(2)
             with c1: 
-                first_url = st.text_input("🌐 粘贴【首帧】网络链接")
-                uploaded_first = st.file_uploader("🖼️ 或上传本地【首帧】", type=allowed_types)
-                first_payload = process_image_to_payload(first_url, uploaded_first, "first_frame")
-                if first_payload: api_content.append(first_payload)
+                asset_input_1 = st.text_input("🎭 首帧 Asset ID")
+                uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】", type=allowed_types)
             with c2:
-                last_url = st.text_input("🌐 粘贴【尾帧】网络链接")
-                uploaded_last = st.file_uploader("🖼️ 或上传本地【尾帧】", type=allowed_types)
-                last_payload = process_image_to_payload(last_url, uploaded_last, "last_frame")
-                if last_payload: api_content.append(last_payload)
+                asset_input_2 = st.text_input("🎭 尾帧 Asset ID")
+                uploaded_file_2 = st.file_uploader("🖼️ 或上传本地【尾帧图】", type=allowed_types)
 
-        # 提交按钮
+        elif ref_mode == "3. 多模态参考 (推荐! 角色+分镜)":
+            st.success("🌟 官方推荐的高级模式：可同时传入已过审的【角色 ID】和自绘的【本地分镜图】！")
+            c1, c2 = st.columns(2)
+            with c1:
+                multi_assets = st.text_input("🎭 填入官方角色 Asset ID (如果有多个，请用逗号 , 隔开)")
+            with c2:
+                multi_uploads = st.file_uploader("🖼️ 上传本地分镜参考图 (支持多选，自动存入图床)", type=allowed_types, accept_multiple_files=True)
+
+        # ==========================================
+        # 🚀 内部图床核心引擎：对接 Supabase Storage
+        # ==========================================
+        def upload_to_supabase(upload_file):
+            if not upload_file: return None
+            try:
+                ext = upload_file.name.split('.')[-1].lower()
+                if ext == 'jpg': ext = 'jpeg'
+                file_name = f"{uuid.uuid4().hex}.{ext}"
+                file_bytes = upload_file.getvalue()
+                
+                # 自动上传到 Supabase 'assets' 桶
+                supabase.storage.from_("assets").upload(
+                    file=file_bytes,
+                    path=file_name,
+                    file_options={"content-type": f"image/{ext}"}
+                )
+                return supabase.storage.from_("assets").get_public_url(file_name)
+            except Exception as e:
+                st.error(f"⚠️ 自动上传图床失败，请检查 Supabase 存储桶设置！错误: {e}")
+                return None
+
+        # 辅助函数：格式化 Asset ID
+        def format_asset_id(val):
+            val = val.strip()
+            if not val.startswith("asset://"):
+                val = f"asset://{val}"
+            return val
+
+        # ==========================================
+        # 🚀 提交任务主逻辑
+        # ==========================================
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
-            
-            # 前置参数校验
-            if ref_mode in ["文生视频 (纯文本)", "多模态参考 (文+参考图)"] and not prompt:
-                st.warning("⚠️ 此模式下，必须输入画面描述 (Prompt)！")
+            if not prompt:
+                st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
                 st.stop()
-                
-            if ref_mode == "图生视频 (首帧)" and len([c for c in api_content if c.get("role") == "first_frame"]) == 0:
-                st.warning("⚠️ 请提供首帧图片！")
-                st.stop()
-                
-            if ref_mode == "图生视频 (首尾帧)":
-                has_first = any(c.get("role") == "first_frame" for c in api_content)
-                has_last = any(c.get("role") == "last_frame" for c in api_content)
-                if not (has_first and has_last):
-                    st.warning("⚠️ 必须同时提供【首帧】和【尾帧】两张图片！")
-                    st.stop()
 
-            status_box = st.info("⏳ 正在组装原生请求体，直接投递给云端引擎...")
-            progress_bar = st.progress(10)
+            status_box = st.info("☁️ 正在打包素材并上传图床...")
+            progress_bar = st.progress(5)
+            
+            api_content = [{"type": "text", "text": prompt}]
+            
+            # --------------------------------------------------
+            # 模式 1：首帧生成 (严格使用 first_frame 角色)
+            # --------------------------------------------------
+            if ref_mode == "1. 首帧生视频 (仅需1张图)":
+                if not asset_input_1 and not uploaded_file_1:
+                    st.warning("⚠️ 请提供 Asset ID 或上传一张本地图片！")
+                    st.stop()
+                
+                final_url = format_asset_id(asset_input_1) if asset_input_1 else upload_to_supabase(uploaded_file_1)
+                if not final_url: st.stop()
+                
+                api_content.append({"type": "image_url", "image_url": {"url": final_url}, "role": "first_frame"})
+
+            # --------------------------------------------------
+            # 模式 2：首尾帧生成 (严格使用 first_frame 和 last_frame)
+            # --------------------------------------------------
+            elif ref_mode == "2. 首尾帧生视频 (仅需2张图)":
+                if (not asset_input_1 and not uploaded_file_1) or (not asset_input_2 and not uploaded_file_2):
+                    st.warning("⚠️ 请确保首尾两张图的 ID 或文件都已提供！")
+                    st.stop()
+                
+                final_url_1 = format_asset_id(asset_input_1) if asset_input_1 else upload_to_supabase(uploaded_file_1)
+                final_url_2 = format_asset_id(asset_input_2) if asset_input_2 else upload_to_supabase(uploaded_file_2)
+                if not final_url_1 or not final_url_2: st.stop()
+                
+                api_content.append({"type": "image_url", "image_url": {"url": final_url_1}, "role": "first_frame"})
+                api_content.append({"type": "image_url", "image_url": {"url": final_url_2}, "role": "last_frame"})
+
+            # --------------------------------------------------
+            # 模式 3：多模态参考 (全部使用 reference_image 角色)
+            # --------------------------------------------------
+            elif ref_mode == "3. 多模态参考 (推荐! 角色+分镜)":
+                if not multi_assets and not multi_uploads:
+                    st.warning("⚠️ 请至少提供一个角色 ID 或上传一张参考图！")
+                    st.stop()
+                
+                # 处理多个 Asset ID
+                if multi_assets:
+                    id_list = [x.strip() for x in multi_assets.split(",") if x.strip()]
+                    for a_id in id_list:
+                        api_content.append({"type": "image_url", "image_url": {"url": format_asset_id(a_id)}, "role": "reference_image"})
+                
+                # 处理多张本地图床上传
+                if multi_uploads:
+                    for up_file in multi_uploads:
+                        up_url = upload_to_supabase(up_file)
+                        if up_url:
+                            api_content.append({"type": "image_url", "image_url": {"url": up_url}, "role": "reference_image"})
+
+
+            # ================= 发送请求 =================
+            status_box.info("⏳ 素材处理完毕！正在请求云端引擎...")
+            progress_bar.progress(15)
             
             is_fast = "fast" in model_type
             model_id = "ep-20260307130821-xw5wf" if is_fast else "ep-20260307130721-bx7tv"
-            
             ratio_val = "adaptive" if ratio == "自适应" else ratio
             dur_val = -1 if duration == "智能决定" else int(duration.split(" ")[0])
             audio_val = True if audio_opt == "生成配套音效/配乐" else False
@@ -250,7 +301,7 @@ else:
                                 supabase.table("token_logs").insert({
                                     "employee_name": st.session_state["username"],
                                     "action_type": ref_mode,
-                                    "prompt_text": prompt[:50] if prompt else "无文本", 
+                                    "prompt_text": prompt[:50], 
                                     "tokens_cost": tokens_used
                                 }).execute()
                             except: pass 
