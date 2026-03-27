@@ -90,7 +90,6 @@ else:
         
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            # 完美适配官方互斥规则的 3 种模式
             ref_mode = st.selectbox("🎯 模式", [
                 "1. 首帧生视频 (仅需1张图)", 
                 "2. 首尾帧生视频 (仅需2张图)", 
@@ -109,7 +108,6 @@ else:
         
         allowed_types = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
         
-        # UI 变量初始化
         asset_input_1 = ""
         asset_input_2 = ""
         multi_assets = ""
@@ -117,7 +115,6 @@ else:
         uploaded_file_2 = None
         multi_uploads = []
 
-        # 根据不同模式，展示最符合逻辑的输入框
         if ref_mode == "1. 首帧生视频 (仅需1张图)":
             st.info("💡 此模式下，您可以填入官方角色 Asset ID，或者上传一张本地分镜图。")
             col_a, col_b = st.columns(2)
@@ -144,9 +141,6 @@ else:
             with c2:
                 multi_uploads = st.file_uploader("🖼️ 上传本地分镜参考图 (支持多选，自动存入图床)", type=allowed_types, accept_multiple_files=True)
 
-        # ==========================================
-        # 🚀 内部图床核心引擎：对接 Supabase Storage
-        # ==========================================
         def upload_to_supabase(upload_file):
             if not upload_file: return None
             try:
@@ -155,7 +149,6 @@ else:
                 file_name = f"{uuid.uuid4().hex}.{ext}"
                 file_bytes = upload_file.getvalue()
                 
-                # 自动上传到 Supabase 'assets' 桶
                 supabase.storage.from_("assets").upload(
                     file=file_bytes,
                     path=file_name,
@@ -166,16 +159,13 @@ else:
                 st.error(f"⚠️ 自动上传图床失败，请检查 Supabase 存储桶设置！错误: {e}")
                 return None
 
-        # 辅助函数：格式化 Asset ID
+        # 辅助函数：严格遵循官方规范格式
         def format_asset_id(val):
             val = val.strip()
             if not val.startswith("asset://"):
                 val = f"asset://{val}"
             return val
 
-        # ==========================================
-        # 🚀 提交任务主逻辑
-        # ==========================================
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
                 st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
@@ -186,9 +176,6 @@ else:
             
             api_content = [{"type": "text", "text": prompt}]
             
-            # --------------------------------------------------
-            # 模式 1：首帧生成 (严格使用 first_frame 角色)
-            # --------------------------------------------------
             if ref_mode == "1. 首帧生视频 (仅需1张图)":
                 if not asset_input_1 and not uploaded_file_1:
                     st.warning("⚠️ 请提供 Asset ID 或上传一张本地图片！")
@@ -199,9 +186,6 @@ else:
                 
                 api_content.append({"type": "image_url", "image_url": {"url": final_url}, "role": "first_frame"})
 
-            # --------------------------------------------------
-            # 模式 2：首尾帧生成 (严格使用 first_frame 和 last_frame)
-            # --------------------------------------------------
             elif ref_mode == "2. 首尾帧生视频 (仅需2张图)":
                 if (not asset_input_1 and not uploaded_file_1) or (not asset_input_2 and not uploaded_file_2):
                     st.warning("⚠️ 请确保首尾两张图的 ID 或文件都已提供！")
@@ -214,21 +198,16 @@ else:
                 api_content.append({"type": "image_url", "image_url": {"url": final_url_1}, "role": "first_frame"})
                 api_content.append({"type": "image_url", "image_url": {"url": final_url_2}, "role": "last_frame"})
 
-            # --------------------------------------------------
-            # 模式 3：多模态参考 (全部使用 reference_image 角色)
-            # --------------------------------------------------
             elif ref_mode == "3. 多模态参考 (推荐! 角色+分镜)":
                 if not multi_assets and not multi_uploads:
                     st.warning("⚠️ 请至少提供一个角色 ID 或上传一张参考图！")
                     st.stop()
                 
-                # 处理多个 Asset ID
                 if multi_assets:
                     id_list = [x.strip() for x in multi_assets.split(",") if x.strip()]
                     for a_id in id_list:
                         api_content.append({"type": "image_url", "image_url": {"url": format_asset_id(a_id)}, "role": "reference_image"})
                 
-                # 处理多张本地图床上传
                 if multi_uploads:
                     for up_file in multi_uploads:
                         up_url = upload_to_supabase(up_file)
@@ -236,7 +215,6 @@ else:
                             api_content.append({"type": "image_url", "image_url": {"url": up_url}, "role": "reference_image"})
 
 
-            # ================= 发送请求 =================
             status_box.info("⏳ 素材处理完毕！正在请求云端引擎...")
             progress_bar.progress(15)
             
@@ -274,7 +252,8 @@ else:
                 
                 retry_count = 0
                 while retry_count < 100: 
-                    time.sleep(10) 
+                    # 【V2.6 核心规则生效】：严格遵守官方“不少于3秒”的防拉黑红线，设为 4 秒安全缓冲
+                    time.sleep(4) 
                     retry_count += 1
                     
                     try:
