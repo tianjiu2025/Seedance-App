@@ -69,7 +69,7 @@ if st.session_state["role"] == "admin":
         else: st.info("暂无生成记录。")
     except Exception as e: st.error(f"数据库连接失败: {e}")
 
-# ================= 4. 员工真实创作台 (严格适配 V2.6) =================
+# ================= 4. 员工真实创作台 =================
 else:
     st.markdown("## 🎬 魔方国际影业 - Seedance 2.0 视频生成台")
 
@@ -77,7 +77,7 @@ else:
         prompt = st.text_area(
             "📝 画面描述 (Prompt)", 
             height=150, 
-            placeholder="请在此输入详细的提示词...\n【@功能提示】：当您在下方上传参考图后，系统会自动标记为 @图1、@图2。您可以直接在文本中描述：“@图1 为男主角，@图2 作为视频首帧...”"
+            placeholder="请在此输入详细的提示词...\n【@功能提示】：下方上传图片后，会自动生成小巧的缩略图并标记为 @图1、@图2。您可以直接在文本中描述：“@图1 为男主角，@图2 作为视频首帧...”"
         )
         
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -108,48 +108,51 @@ else:
         multi_uploads = []
         enable_web_search = False
 
-        if ref_mode == "0. 纯文生视频 (支持联网)":
+        # ================= 动态 UI：带微型缩略图 =================
+        if ref_mode.startswith("0."):
             st.info("💡 纯文本生成模式。开启联网搜索可大幅提升实效性元素的准确度。")
             enable_web_search = st.toggle("🌐 开启联网增强搜索 (Web Search)")
 
-        elif ref_mode == "1. 首帧生视频 (仅需1图)":
+        elif ref_mode.startswith("1."):
             col_a, col_b = st.columns(2)
             with col_a:
-                asset_input_1 = st.text_input("🎭 填入官方 Asset ID (如: asset-xxx)")
+                asset_input_1 = st.text_input("🎭 官方 Asset ID (无则留空)")
             with col_b:
-                uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】(自动存入图床)", type=allowed_types)
-                if uploaded_file_1:
-                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", use_container_width=True)
-
-        elif ref_mode == "2. 首尾帧生视频 (仅需2图)":
-            c1, c2 = st.columns(2)
-            with c1: 
-                asset_input_1 = st.text_input("🎭 首帧 Asset ID")
                 uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】", type=allowed_types)
                 if uploaded_file_1:
-                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", use_container_width=True)
+                    # 【修复点】：强制使用 150px 宽度，彻底变成缩略图
+                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", width=150)
+
+        elif ref_mode.startswith("2."):
+            c1, c2 = st.columns(2)
+            with c1: 
+                asset_input_1 = st.text_input("🎭 首帧 Asset ID (无则留空)")
+                uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】", type=allowed_types)
+                if uploaded_file_1:
+                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", width=150)
             with c2:
-                asset_input_2 = st.text_input("🎭 尾帧 Asset ID")
+                asset_input_2 = st.text_input("🎭 尾帧 Asset ID (无则留空)")
                 uploaded_file_2 = st.file_uploader("🖼️ 或上传本地【尾帧图】", type=allowed_types)
                 if uploaded_file_2:
-                    st.image(uploaded_file_2, caption="🏷️ @图2 (尾帧)", use_container_width=True)
+                    st.image(uploaded_file_2, caption="🏷️ @图2 (尾帧)", width=150)
 
-        elif ref_mode == "3. 多模态参考 (角色+分镜)":
+        elif ref_mode.startswith("3."):
             st.success("🌟 高级混合模式：同时传入已过审的【角色 ID】和自绘的【本地分镜参考图】！")
             c1, c2 = st.columns(2)
             with c1:
-                multi_assets = st.text_input("🎭 填入角色 Asset ID (多个用英文逗号 , 隔开)")
+                multi_assets = st.text_input("🎭 官方 Asset ID (多个用逗号隔开，无则留空)")
             with c2:
-                multi_uploads = st.file_uploader("🖼️ 上传分镜参考图 (支持多选，自动存入私有图床)", type=allowed_types, accept_multiple_files=True)
+                multi_uploads = st.file_uploader("🖼️ 上传本地分镜图 (支持多选)", type=allowed_types, accept_multiple_files=True)
             
             if multi_uploads:
-                st.markdown("### 📎 待引用的本地图库 (@图库)")
-                cols = st.columns(min(len(multi_uploads), 4))
+                st.markdown("### 📎 @本地图库 (画廊)")
+                # 强制分为6列，展示极致微小的缩略图
+                cols = st.columns(6)
                 for idx, up_file in enumerate(multi_uploads):
-                    col_idx = idx % 4
-                    with cols[col_idx]:
-                        st.image(up_file, caption=f"🏷️ @图{idx+1}", use_container_width=True)
+                    with cols[idx % 6]:
+                        st.image(up_file, caption=f"🏷️ @图{idx+1}", width=120)
 
+        # ================= 内部自动图床引擎 =================
         def upload_to_supabase(upload_file):
             if not upload_file: return None
             try:
@@ -168,12 +171,17 @@ else:
                 st.error(f"⚠️ 自动上传图床失败，请检查 Supabase 存储桶设置！错误: {e}")
                 return None
 
+        # 增强防呆：过滤空字符串和不合法输入
         def format_asset_id(val):
             val = val.strip()
+            if not val: return None
+            if val.startswith("http://") or val.startswith("https://"):
+                return val
             if not val.startswith("asset://"):
                 val = f"asset://{val}"
             return val
 
+        # ================= 发起请求主逻辑 =================
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
                 st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
@@ -184,32 +192,43 @@ else:
             
             api_content = [{"type": "text", "text": prompt}]
             
-            if ref_mode == "1. 首帧生视频 (仅需1图)":
-                if not asset_input_1 and not uploaded_file_1:
+            # 优先使用上传的文件，防呆用户同时填了错误文本
+            if ref_mode.startswith("1."):
+                a1_clean = asset_input_1.strip()
+                if not a1_clean and not uploaded_file_1:
                     st.warning("⚠️ 此模式请提供 Asset ID 或上传一张本地图片！")
                     st.stop()
-                final_url = format_asset_id(asset_input_1) if asset_input_1 else upload_to_supabase(uploaded_file_1)
+                    
+                # 【核心防呆拦截】：如果用户传了文件，直接忽略输入框里的文字，防止拼错 invalid asset uri
+                final_url = upload_to_supabase(uploaded_file_1) if uploaded_file_1 else format_asset_id(a1_clean)
                 if not final_url: st.stop()
                 api_content.append({"type": "image_url", "image_url": {"url": final_url}, "role": "first_frame"})
 
-            elif ref_mode == "2. 首尾帧生视频 (仅需2图)":
-                if (not asset_input_1 and not uploaded_file_1) or (not asset_input_2 and not uploaded_file_2):
+            elif ref_mode.startswith("2."):
+                a1_clean = asset_input_1.strip()
+                a2_clean = asset_input_2.strip()
+                if (not a1_clean and not uploaded_file_1) or (not a2_clean and not uploaded_file_2):
                     st.warning("⚠️ 此模式请确保首尾两张图均已提供！")
                     st.stop()
-                final_url_1 = format_asset_id(asset_input_1) if asset_input_1 else upload_to_supabase(uploaded_file_1)
-                final_url_2 = format_asset_id(asset_input_2) if asset_input_2 else upload_to_supabase(uploaded_file_2)
+                    
+                final_url_1 = upload_to_supabase(uploaded_file_1) if uploaded_file_1 else format_asset_id(a1_clean)
+                final_url_2 = upload_to_supabase(uploaded_file_2) if uploaded_file_2 else format_asset_id(a2_clean)
                 if not final_url_1 or not final_url_2: st.stop()
                 api_content.append({"type": "image_url", "image_url": {"url": final_url_1}, "role": "first_frame"})
                 api_content.append({"type": "image_url", "image_url": {"url": final_url_2}, "role": "last_frame"})
 
-            elif ref_mode == "3. 多模态参考 (角色+分镜)":
-                if not multi_assets and not multi_uploads:
+            elif ref_mode.startswith("3."):
+                if not multi_assets.strip() and not multi_uploads:
                     st.warning("⚠️ 此模式请至少提供一个角色 ID 或上传一张参考图！")
                     st.stop()
-                if multi_assets:
+                    
+                if multi_assets.strip():
                     id_list = [x.strip() for x in multi_assets.split(",") if x.strip()]
                     for a_id in id_list:
-                        api_content.append({"type": "image_url", "image_url": {"url": format_asset_id(a_id)}, "role": "reference_image"})
+                        formatted_id = format_asset_id(a_id)
+                        if formatted_id:
+                            api_content.append({"type": "image_url", "image_url": {"url": formatted_id}, "role": "reference_image"})
+                            
                 if multi_uploads:
                     for up_file in multi_uploads:
                         up_url = upload_to_supabase(up_file)
@@ -233,7 +252,7 @@ else:
                 "duration": dur_val
             }
             
-            if ref_mode == "0. 纯文生视频 (支持联网)" and enable_web_search:
+            if ref_mode.startswith("0.") and enable_web_search:
                 payload["tools"] = [{"type": "web_search"}]
             
             headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
