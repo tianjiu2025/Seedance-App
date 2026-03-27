@@ -16,7 +16,6 @@ try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
     SEEDANCE_API_TOKEN = st.secrets["SEEDANCE_API_TOKEN"]
-    # 严格对齐官方 V2.4/2.5/2.6 最新独立请求地址
     CREATE_URL = st.secrets.get("CREATE_URL", "http://118.196.64.1/api/v1/doubao/create") 
     GET_URL = st.secrets.get("GET_URL", "http://118.196.64.1/api/v1/doubao/get_result") 
 except Exception as e:
@@ -83,7 +82,6 @@ else:
         
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
-            # 完整覆盖官方支持的 4 大模式，且严格隔离互斥属性
             ref_mode = st.selectbox("🎯 模式", [
                 "0. 纯文生视频 (支持联网)",
                 "1. 首帧生视频 (仅需1图)", 
@@ -110,7 +108,6 @@ else:
         multi_uploads = []
         enable_web_search = False
 
-        # ================= 动态 UI 面板 =================
         if ref_mode == "0. 纯文生视频 (支持联网)":
             st.info("💡 纯文本生成模式。开启联网搜索可大幅提升实效性元素的准确度。")
             enable_web_search = st.toggle("🌐 开启联网增强搜索 (Web Search)")
@@ -153,7 +150,6 @@ else:
                     with cols[col_idx]:
                         st.image(up_file, caption=f"🏷️ @图{idx+1}", use_container_width=True)
 
-        # ================= 内部自动图床引擎 =================
         def upload_to_supabase(upload_file):
             if not upload_file: return None
             try:
@@ -178,7 +174,6 @@ else:
                 val = f"asset://{val}"
             return val
 
-        # ================= 发起请求主逻辑 =================
         if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
             if not prompt:
                 st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
@@ -187,10 +182,8 @@ else:
             status_box = st.info("☁️ 正在打包素材并上传图床...")
             progress_bar = st.progress(5)
             
-            # 1. 组装 Content 文本节点 (文档要求必传)
             api_content = [{"type": "text", "text": prompt}]
             
-            # 2. 严格按 V2.6 官方文档的 Role 互斥规则注入媒体节点
             if ref_mode == "1. 首帧生视频 (仅需1图)":
                 if not asset_input_1 and not uploaded_file_1:
                     st.warning("⚠️ 此模式请提供 Asset ID 或上传一张本地图片！")
@@ -223,7 +216,6 @@ else:
                         if up_url:
                             api_content.append({"type": "image_url", "image_url": {"url": up_url}, "role": "reference_image"})
 
-            # 3. 组装底层 Payload 参数
             status_box.info("⏳ 素材处理完毕！正在请求云端引擎...")
             progress_bar.progress(15)
             
@@ -241,8 +233,73 @@ else:
                 "duration": dur_val
             }
             
-            # V2.6 纯文生视频特有参数: 联网搜索
             if ref_mode == "0. 纯文生视频 (支持联网)" and enable_web_search:
                 payload["tools"] = [{"type": "web_search"}]
             
-            headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type":
+            headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
+            
+            try:
+                res = requests.post(CREATE_URL, headers=headers, json=payload)
+                if res.status_code != 200:
+                    log_api_error(f"❌ 任务投递失败：HTTP {res.status_code} - 响应：{res.text}")
+                    st.stop()
+                    
+                create_res_json = res.json()
+                task_id = create_res_json.get("id")
+                
+                if not task_id:
+                    log_api_error(f"❌ 任务投递失败（API无ID）：{create_res_json}")
+                    st.stop()
+                    
+                status_box.info(f"✅ 任务投递成功！任务ID: {task_id}。引擎接收无误，正在渲染中...")
+                progress_bar.progress(30)
+                
+                retry_count = 0
+                while retry_count < 150: 
+                    time.sleep(4) 
+                    retry_count += 1
+                    
+                    try:
+                        status_res = requests.post(GET_URL, headers=headers, json={"id": task_id})
+                        if status_res.status_code != 200: continue 
+                        
+                        status_res_json = status_res.json()
+                        current_status = status_res_json.get("status")
+                        
+                        if current_status == "queued":
+                            status_box.warning(f"🔄 引擎排队中 (第 {retry_count} 次查询)...")
+                            progress_bar.progress(40)
+                        elif current_status == "running":
+                            status_box.info("🎨 算力全开，正在疯狂渲染视频帧...")
+                            progress_bar.progress(70)
+                        elif current_status == "succeeded":
+                            progress_bar.progress(100)
+                            status_box.success("🎉 生成大功告成！")
+                            video_url = status_res_json.get("content", {}).get("video_url")
+                            st.video(video_url) 
+                            
+                            try:
+                                tokens_used = status_res_json.get("usage", {}).get("completion_tokens", 15)
+                                supabase.table("token_logs").insert({
+                                    "employee_name": st.session_state["username"],
+                                    "action_type": ref_mode,
+                                    "prompt_text": prompt[:50], 
+                                    "tokens_cost": tokens_used
+                                }).execute()
+                            except: pass 
+                            break
+                        elif current_status in ["failed", "cancelled", "expired"]:
+                            err_info = status_res_json.get("error")
+                            if err_info and isinstance(err_info, dict):
+                                err_msg = err_info.get("message", "未知原因")
+                                err_code = err_info.get("code", "未知错误码")
+                                log_api_error(f"❌ 引擎渲染失败 (状态: {current_status})\n\n原因: {err_msg} (错误码: {err_code})")
+                            else:
+                                log_api_error(f"❌ 引擎渲染失败 (状态: {current_status})\n\nAPI 未返回具体错误信息。")
+                            break
+                            
+                    except Exception as poll_e:
+                        log_api_error(f"⚠️ 轮询过程出现网络波动，系统正在自动重试: {poll_e}")
+                        
+            except Exception as e:
+                log_api_error(f"网络通信出现严重故障，请稍后再试：{e}")
