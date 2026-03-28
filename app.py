@@ -22,13 +22,13 @@ except Exception as e:
     st.error(f"❌ 必填 Secrets 配置缺失: {e}")
     st.stop()
 
-# ================= 2. 极简稳定版登录逻辑 =================
+# ================= 2. 全局画廊与登录状态初始化 =================
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
     st.session_state["username"] = ""
     st.session_state["role"] = ""
 
-# 初始化视频历史画廊缓存池
+# 核心新增：初始化当前会话的视频画廊缓存池
 if "video_history" not in st.session_state:
     st.session_state["video_history"] = []
 
@@ -114,6 +114,15 @@ else:
         multi_uploads = []
         enable_web_search = False
 
+        # 核心防崩魔法：即使图片无法在网页预览，也不会让网页崩溃
+        def safe_preview(upload_file, caption_text):
+            if upload_file:
+                try:
+                    st.image(upload_file, caption=caption_text, use_container_width=True)
+                except Exception:
+                    st.success(f"{caption_text} ✅ 已选中: {upload_file.name}")
+
+        # ================= 动态 UI：带微型缩略图 =================
         if ref_mode.startswith("0."):
             st.info("💡 纯文本生成模式。开启联网搜索可大幅提升实效性元素的准确度。")
             enable_web_search = st.toggle("🌐 开启联网增强搜索 (Web Search)")
@@ -124,21 +133,18 @@ else:
                 asset_input_1 = st.text_input("🎭 官方 Asset ID (无则留空)")
             with col_b:
                 uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】", type=allowed_types)
-                if uploaded_file_1:
-                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", width=150)
+                safe_preview(uploaded_file_1, "🏷️ @图1 (首帧)")
 
         elif ref_mode.startswith("2."):
             c1, c2 = st.columns(2)
             with c1: 
                 asset_input_1 = st.text_input("🎭 首帧 Asset ID (无则留空)")
                 uploaded_file_1 = st.file_uploader("🖼️ 或上传本地【首帧图】", type=allowed_types)
-                if uploaded_file_1:
-                    st.image(uploaded_file_1, caption="🏷️ @图1 (首帧)", width=150)
+                safe_preview(uploaded_file_1, "🏷️ @图1 (首帧)")
             with c2:
                 asset_input_2 = st.text_input("🎭 尾帧 Asset ID (无则留空)")
                 uploaded_file_2 = st.file_uploader("🖼️ 或上传本地【尾帧图】", type=allowed_types)
-                if uploaded_file_2:
-                    st.image(uploaded_file_2, caption="🏷️ @图2 (尾帧)", width=150)
+                safe_preview(uploaded_file_2, "🏷️ @图2 (尾帧)")
 
         elif ref_mode.startswith("3."):
             st.success("🌟 高级混合模式：同时传入已过审的【角色 ID】和自绘的【本地分镜参考图】！")
@@ -149,4 +155,203 @@ else:
                 multi_uploads = st.file_uploader("🖼️ 上传本地分镜图 (支持多选)", type=allowed_types, accept_multiple_files=True)
             
             if multi_uploads:
-                st.markdown
+                st.markdown("### 📎 @本地图库 (画廊)")
+                cols = st.columns(6)
+                for idx, up_file in enumerate(multi_uploads):
+                    with cols[idx % 6]:
+                        safe_preview(up_file, f"🏷️ @图{idx+1}")
+
+        # ================= 内部自动图床引擎 =================
+        def upload_to_supabase(upload_file):
+            if not upload_file: return None
+            try:
+                ext = upload_file.name.split('.')[-1].lower()
+                if ext == 'jpg': ext = 'jpeg'
+                file_name = f"{uuid.uuid4().hex}.{ext}"
+                file_bytes = upload_file.getvalue()
+                
+                supabase.storage.from_("assets").upload(
+                    file=file_bytes,
+                    path=file_name,
+                    file_options={"content-type": f"image/{ext}"}
+                )
+                return supabase.storage.from_("assets").get_public_url(file_name)
+            except Exception as e:
+                st.error(f"⚠️ 自动上传图床失败，请检查 Supabase 存储桶设置！错误: {e}")
+                return None
+
+        # 增强防呆：过滤空字符串和不合法输入
+        def format_asset_id(val):
+            val = val.strip()
+            if not val: return None
+            if val.startswith("http://") or val.startswith("https://"):
+                return val
+            if not val.startswith("asset://"):
+                val = f"asset://{val}"
+            return val
+
+        # ================= 发起请求主逻辑 =================
+        if st.button("🚀 提交真实生成任务", type="primary", use_container_width=True):
+            if not prompt:
+                st.warning("⚠️ 请输入画面描述 (Prompt) 才能进行生成！")
+                st.stop()
+
+            status_box = st.info("☁️ 正在打包素材并上传图床...")
+            progress_bar = st.progress(5)
+            
+            api_content = [{"type": "text", "text": prompt}]
+            
+            # 优先使用上传的文件，防呆用户同时填了错误文本
+            if ref_mode.startswith("1."):
+                a1_clean = asset_input_1.strip()
+                if not a1_clean and not uploaded_file_1:
+                    st.warning("⚠️ 此模式请提供 Asset ID 或上传一张本地图片！")
+                    st.stop()
+                    
+                final_url = upload_to_supabase(uploaded_file_1) if uploaded_file_1 else format_asset_id(a1_clean)
+                if not final_url: st.stop()
+                api_content.append({"type": "image_url", "image_url": {"url": final_url}, "role": "first_frame"})
+
+            elif ref_mode.startswith("2."):
+                a1_clean = asset_input_1.strip()
+                a2_clean = asset_input_2.strip()
+                if (not a1_clean and not uploaded_file_1) or (not a2_clean and not uploaded_file_2):
+                    st.warning("⚠️ 此模式请确保首尾两张图均已提供！")
+                    st.stop()
+                    
+                final_url_1 = upload_to_supabase(uploaded_file_1) if uploaded_file_1 else format_asset_id(a1_clean)
+                final_url_2 = upload_to_supabase(uploaded_file_2) if uploaded_file_2 else format_asset_id(a2_clean)
+                if not final_url_1 or not final_url_2: st.stop()
+                api_content.append({"type": "image_url", "image_url": {"url": final_url_1}, "role": "first_frame"})
+                api_content.append({"type": "image_url", "image_url": {"url": final_url_2}, "role": "last_frame"})
+
+            elif ref_mode.startswith("3."):
+                if not multi_assets.strip() and not multi_uploads:
+                    st.warning("⚠️ 此模式请至少提供一个角色 ID 或上传一张参考图！")
+                    st.stop()
+                    
+                if multi_assets.strip():
+                    id_list = [x.strip() for x in multi_assets.split(",") if x.strip()]
+                    for a_id in id_list:
+                        formatted_id = format_asset_id(a_id)
+                        if formatted_id:
+                            api_content.append({"type": "image_url", "image_url": {"url": formatted_id}, "role": "reference_image"})
+                            
+                if multi_uploads:
+                    for up_file in multi_uploads:
+                        up_url = upload_to_supabase(up_file)
+                        if up_url:
+                            api_content.append({"type": "image_url", "image_url": {"url": up_url}, "role": "reference_image"})
+
+            status_box.info("⏳ 素材处理完毕！正在请求云端引擎...")
+            progress_bar.progress(15)
+            
+            is_fast = "fast" in model_type
+            model_id = "ep-20260307130821-xw5wf" if is_fast else "ep-20260307130721-bx7tv"
+            ratio_val = "adaptive" if ratio == "自适应" else ratio
+            dur_val = -1 if "智能决定" in duration else int(duration.split(" ")[0])
+            audio_val = True if audio_opt == "生成配套音效/配乐" else False
+            
+            payload = {
+                "model": model_id,
+                "content": api_content,
+                "generate_audio": audio_val,
+                "ratio": ratio_val,
+                "duration": dur_val
+            }
+            
+            if ref_mode.startswith("0.") and enable_web_search:
+                payload["tools"] = [{"type": "web_search"}]
+            
+            headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
+            
+            try:
+                res = requests.post(CREATE_URL, headers=headers, json=payload)
+                if res.status_code != 200:
+                    log_api_error(f"❌ 任务投递失败：HTTP {res.status_code} - 响应：{res.text}")
+                    st.stop()
+                    
+                create_res_json = res.json()
+                task_id = create_res_json.get("id")
+                
+                if not task_id:
+                    log_api_error(f"❌ 任务投递失败（API无ID）：{create_res_json}")
+                    st.stop()
+                    
+                status_box.info(f"✅ 任务投递成功！任务ID: {task_id}。引擎接收无误，正在渲染中...")
+                progress_bar.progress(30)
+                
+                retry_count = 0
+                while retry_count < 150: 
+                    time.sleep(4) 
+                    retry_count += 1
+                    
+                    try:
+                        status_res = requests.post(GET_URL, headers=headers, json={"id": task_id})
+                        if status_res.status_code != 200: continue 
+                        
+                        status_res_json = status_res.json()
+                        current_status = status_res_json.get("status")
+                        
+                        if current_status == "queued":
+                            status_box.warning(f"🔄 引擎排队中 (第 {retry_count} 次查询)...")
+                            progress_bar.progress(40)
+                        elif current_status == "running":
+                            status_box.info("🎨 算力全开，正在疯狂渲染视频帧...")
+                            progress_bar.progress(70)
+                        elif current_status == "succeeded":
+                            progress_bar.progress(100)
+                            status_box.success("🎉 生成大功告成！已为您自动存入下方【创作画廊】！")
+                            video_url = status_res_json.get("content", {}).get("video_url")
+                            
+                            # 核心修复：成功后推入画廊并保存
+                            st.session_state["video_history"].insert(0, {
+                                "task_id": task_id,
+                                "url": video_url,
+                                "prompt": prompt,
+                                "time": time.strftime("%H:%M:%S")
+                            })
+                            
+                            try:
+                                tokens_used = status_res_json.get("usage", {}).get("completion_tokens", 15)
+                                supabase.table("token_logs").insert({
+                                    "employee_name": st.session_state["username"],
+                                    "action_type": ref_mode,
+                                    "prompt_text": prompt[:50], 
+                                    "tokens_cost": tokens_used
+                                }).execute()
+                            except: pass 
+                            break
+                        elif current_status in ["failed", "cancelled", "expired"]:
+                            err_info = status_res_json.get("error")
+                            if err_info and isinstance(err_info, dict):
+                                err_msg = err_info.get("message", "未知原因")
+                                err_code = err_info.get("code", "未知错误码")
+                                log_api_error(f"❌ 引擎渲染失败 (状态: {current_status})\n\n原因: {err_msg} (错误码: {err_code})")
+                            else:
+                                log_api_error(f"❌ 引擎渲染失败 (状态: {current_status})\n\nAPI 未返回具体错误信息。")
+                            break
+                            
+                    except Exception as poll_e:
+                        log_api_error(f"⚠️ 轮询过程出现网络波动，系统正在自动重试: {poll_e}")
+                        
+            except Exception as e:
+                log_api_error(f"网络通信出现严重故障，请稍后再试：{e}")
+
+    # ================= 底部专区：防丢失视频画廊库 =================
+    if st.session_state["video_history"]:
+        st.write("---")
+        st.markdown("### 🎞️ 我的创作画廊 (当前工作空间)")
+        st.warning("⚠️ 官方提醒：生成的视频链接会在 24 小时后失效，请及时点击下方链接转存下载到本地！")
+        
+        # 使用 3 列网格布局，完美控制视频成为精致的“缩略屏”
+        gallery_cols = st.columns(3)
+        for idx, item in enumerate(st.session_state["video_history"]):
+            with gallery_cols[idx % 3]:
+                # 放入容器中增加边框，更显企业级精致感
+                with st.container(border=True):
+                    st.video(item["url"])
+                    st.caption(f"🕒 生成时间：{item['time']}")
+                    st.caption(f"📝 提示词：{item['prompt'][:20]}...")
+                    # 提供直达下载的链接
+                    st.markdown(f"[📥 点击下载源文件]({item['url']})")
