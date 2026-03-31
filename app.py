@@ -43,10 +43,17 @@ if not st.session_state["logged_in"]:
         pwd_input = st.text_input("🔑 登录密码", type="password")
         
         if st.button("🚀 登录系统", use_container_width=True):
+            # ===== 团队账号库已更新 =====
             users = {
                 "admin": {"pwd": "888888", "name": "天九老板", "role": "admin"},
                 "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
-                "zhangsan": {"pwd": "666888", "name": "特效师张三", "role": "employee"}
+                "zhangsan": {"pwd": "666888", "name": "特效师张三", "role": "employee"},
+                "lisi": {"pwd": "222222", "name": "原画师李四", "role": "employee"},
+                "wangwu": {"pwd": "333333", "name": "音效师王五", "role": "employee"},
+                "zhaoliu": {"pwd": "444444", "name": "模型师赵六", "role": "employee"},
+                "sunqi": {"pwd": "555555", "name": "动画师孙七", "role": "employee"},
+                "zhouba": {"pwd": "666666", "name": "编剧周八", "role": "employee"},
+                "wujiu": {"pwd": "777777", "name": "运营吴九", "role": "employee"}
             }
             if user_input in users and users[user_input]["pwd"] == pwd_input:
                 user_info = users[user_input]
