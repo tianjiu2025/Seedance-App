@@ -28,6 +28,10 @@ except Exception as e:
 if "logged_in" not in st.session_state:
     st.session_state.update({"logged_in": False, "username": "", "role": ""})
 
+# 全局高频时间锁：防御连环并发查询
+if "last_api_call" not in st.session_state:
+    st.session_state["last_api_call"] = 0
+
 users_db = {
     "admin": {"pwd": "888888", "name": "天九老板", "role": "admin"},
     "yuangong1": {"pwd": "123456", "name": "剪辑师小王", "role": "employee"},
@@ -40,7 +44,6 @@ users_db = {
     "wujiu": {"pwd": "777777", "name": "运营吴九", "role": "employee"}
 }
 
-# 核心防崩 1：从 URL 读取令牌进行静默重连
 if not st.session_state["logged_in"]:
     saved_user = st.query_params.get("session_token")
     if saved_user in users_db:
@@ -55,7 +58,6 @@ if not st.session_state["logged_in"]:
         pwd_input = st.text_input("🔑 登录密码", type="password")
         if st.button("🚀 登录系统", use_container_width=True):
             if user_input in users_db and users_db[user_input]["pwd"] == pwd_input:
-                # 登录成功，将令牌写入 URL，实现掉线自动复活
                 st.query_params["session_token"] = user_input
                 st.session_state.update({"logged_in": True, "username": users_db[user_input]["name"], "role": users_db[user_input]["role"]})
                 st.rerun() 
@@ -66,7 +68,7 @@ if not st.session_state["logged_in"]:
 st.sidebar.title(f"👤 {st.session_state['username']}")
 if st.sidebar.button("退出登录"):
     st.session_state.clear()
-    st.query_params.clear() # 彻底清除令牌
+    st.query_params.clear() 
     st.rerun()
 
 if st.session_state["role"] == "admin":
@@ -78,7 +80,7 @@ if st.session_state["role"] == "admin":
     except Exception as e: st.error(f"数据库连接异常: {e}")
     st.stop()
 
-# ================= 3. 黑匣子草稿箱 (终极防提示词丢失) =================
+# ================= 3. 黑匣子草稿箱 =================
 DRAFT_FILE = "prompt_drafts.json"
 
 def load_draft(username):
@@ -130,7 +132,6 @@ def fetch_and_store_video(temp_url):
 # ================= 5. 员工创作台主逻辑 =================
 st.markdown("## 🎬 魔方国际影业 - 视频生成台")
 with st.container(border=True):
-    # 绑定草稿箱：失去焦点即自动写入本地硬盘
     prompt = st.text_area("📝 画面描述 (Prompt)", key="prompt_input", on_change=save_draft, height=150, placeholder="写完提示词后，随便点一下网页空白处，系统就会静默保存您的草稿。")
     
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -180,7 +181,6 @@ with st.container(border=True):
     elif ref_mode.startswith("3."):
         c1, c2 = st.columns(2)
         with c1: multi_assets = st.text_input("🎭 官方 Asset ID (多个用逗号隔开)")
-        # 【全模态打通】：支持图、视频、音频全家桶混合上传
         with c2: multi_up = st.file_uploader("🖼️/🎬/🎵 混合上传参考素材", type=['png', 'jpg', 'jpeg', 'mp4', 'mov', 'wav', 'mp3'], accept_multiple_files=True)
         if multi_up:
             cols = st.columns(6)
@@ -217,7 +217,6 @@ with st.container(border=True):
                     fid = format_asset_id(a_id)
                     if fid: api_content.append({"type": "image_url", "image_url": {"url": fid}, "role": "reference_image"})
             if multi_up:
-                # 智能识别后缀并分发正确的 API 参数结构
                 for f in multi_up:
                     ext = f.name.split('.')[-1].lower()
                     u_url = upload_file_to_supabase(f.getvalue(), ext)
@@ -257,7 +256,6 @@ with st.container(border=True):
 st.write("---")
 st.markdown("### 🎞️ 永久云端资产画廊")
 
-# 【护城河技术】后台独立运作，每 5 秒刷新一次画廊，绝不打断您上方打字的手感
 @st.fragment(run_every=5)
 def auto_polling_gallery():
     headers = {"Authorization": f"Bearer {SEEDANCE_API_TOKEN}", "Content-Type": "application/json"}
@@ -270,28 +268,30 @@ def auto_polling_gallery():
                 with cols[idx % 3]:
                     with st.container(border=True):
                         
-                        # 满足 V2.6 要求的 5秒间隔轮询，彻底告别封禁风险
                         if item["status"] in ["running", "queued"]:
-                            try:
-                                s_res = requests.post(GET_URL, headers=headers, json={"id": item["task_id"]})
-                                if s_res.status_code == 200:
-                                    live_status = s_res.json().get("status")
-                                    if live_status == "succeeded":
-                                        temp_url = s_res.json().get("content", {}).get("video_url")
-                                        st.toast("🎉 视频生成完毕，正在为您加密转存...", icon="💾")
-                                        perm_url = fetch_and_store_video(temp_url)
-                                        supabase.table("video_gallery").update({"status": "succeeded", "video_url": perm_url}).eq("task_id", item["task_id"]).execute()
-                                        item["status"], item["video_url"] = "succeeded", perm_url
-                                        
-                                        tokens = s_res.json().get("usage", {}).get("completion_tokens", 15)
-                                        supabase.table("token_logs").insert({"employee_name": st.session_state["username"], "action_type": item.get("ref_mode", "未知模式"), "prompt_text": item["prompt"], "tokens_cost": tokens}).execute()
-                                        
-                                    elif live_status in ["failed", "cancelled", "expired"]:
-                                        supabase.table("video_gallery").update({"status": live_status}).eq("task_id", item["task_id"]).execute()
-                                        item["status"] = live_status
-                            except Exception: pass
+                            # 【绝密修复】：实时比对原子钟时间，哪怕循环里有 3 个任务排队，也只会在间隔大于 3.5 秒时才会发出下一个查询，彻底避免并发熔断！
+                            if time.time() - st.session_state["last_api_call"] > 3.5:
+                                try:
+                                    s_res = requests.post(GET_URL, headers=headers, json={"id": item["task_id"]})
+                                    st.session_state["last_api_call"] = time.time() 
+                                    
+                                    if s_res.status_code == 200:
+                                        live_status = s_res.json().get("status")
+                                        if live_status == "succeeded":
+                                            temp_url = s_res.json().get("content", {}).get("video_url")
+                                            st.toast("🎉 视频生成完毕，正在为您加密转存...", icon="💾")
+                                            perm_url = fetch_and_store_video(temp_url)
+                                            supabase.table("video_gallery").update({"status": "succeeded", "video_url": perm_url}).eq("task_id", item["task_id"]).execute()
+                                            item["status"], item["video_url"] = "succeeded", perm_url
+                                            
+                                            tokens = s_res.json().get("usage", {}).get("completion_tokens", 15)
+                                            supabase.table("token_logs").insert({"employee_name": st.session_state["username"], "action_type": item.get("ref_mode", "未知模式"), "prompt_text": item["prompt"], "tokens_cost": tokens}).execute()
+                                            
+                                        elif live_status in ["failed", "cancelled", "expired"]:
+                                            supabase.table("video_gallery").update({"status": live_status}).eq("task_id", item["task_id"]).execute()
+                                            item["status"] = live_status
+                                except Exception: pass
                         
-                        # 画廊展示 UI
                         if item["status"] == "succeeded" and item["video_url"]:
                             st.video(item["video_url"])
                             st.markdown(f"**永久资产** | [📥 高清下载]({item['video_url']})")
