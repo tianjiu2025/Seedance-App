@@ -28,7 +28,6 @@ except Exception as e:
 if "logged_in" not in st.session_state:
     st.session_state.update({"logged_in": False, "username": "", "role": ""})
 
-# 全局高频时间锁：防御连环并发查询
 if "last_api_call" not in st.session_state:
     st.session_state["last_api_call"] = 0
 
@@ -80,34 +79,52 @@ if st.session_state["role"] == "admin":
     except Exception as e: st.error(f"数据库连接异常: {e}")
     st.stop()
 
-# ================= 3. 黑匣子草稿箱 =================
-DRAFT_FILE = "prompt_drafts.json"
+# ================= 3. 终极快照系统 (保留所有文字与设定) =================
+DRAFT_FILE = "workspace_snapshot.json"
 
-def load_draft(username):
+def get_snapshot():
     if os.path.exists(DRAFT_FILE):
         try:
             with open(DRAFT_FILE, 'r', encoding='utf-8') as f: 
-                return json.load(f).get(username, "")
+                return json.load(f).get(st.session_state["username"], {})
         except: pass
-    return ""
+    return {}
 
-def save_draft():
+def save_snapshot():
+    # 只要有任何改动，立刻全盘抓取所有带 key 的组件状态存入硬盘
     username = st.session_state.get("username", "")
-    text = st.session_state.get("prompt_input", "")
     if not username: return
-    drafts = {}
+    
+    current_state = {
+        "prompt": st.session_state.get("prompt_input", ""),
+        "ref_mode": st.session_state.get("ref_mode_key", "0. 纯文生视频"),
+        "model": st.session_state.get("model_key", "Seedance 2.0 (画质)"),
+        "ratio": st.session_state.get("ratio_key", "自适应"),
+        "duration": st.session_state.get("duration_key", "5 秒"),
+        "audio": st.session_state.get("audio_key", "生成配套音效")
+    }
+    
+    all_drafts = {}
     if os.path.exists(DRAFT_FILE):
         try:
-            with open(DRAFT_FILE, 'r', encoding='utf-8') as f: drafts = json.load(f)
+            with open(DRAFT_FILE, 'r', encoding='utf-8') as f: all_drafts = json.load(f)
         except: pass
-    drafts[username] = text
+        
+    all_drafts[username] = current_state
     try:
-        with open(DRAFT_FILE, 'w', encoding='utf-8') as f: json.dump(drafts, f, ensure_ascii=False)
+        with open(DRAFT_FILE, 'w', encoding='utf-8') as f: json.dump(all_drafts, f, ensure_ascii=False)
     except: pass
 
-if "prompt_draft_loaded" not in st.session_state:
-    st.session_state["prompt_input"] = load_draft(st.session_state["username"])
-    st.session_state["prompt_draft_loaded"] = True
+# 初始化加载快照：将硬盘数据强行注入到本次会话
+if "snapshot_loaded" not in st.session_state:
+    saved_data = get_snapshot()
+    st.session_state["prompt_input"] = saved_data.get("prompt", "")
+    st.session_state["ref_mode_key"] = saved_data.get("ref_mode", "0. 纯文生视频")
+    st.session_state["model_key"] = saved_data.get("model", "Seedance 2.0 (画质)")
+    st.session_state["ratio_key"] = saved_data.get("ratio", "自适应")
+    st.session_state["duration_key"] = saved_data.get("duration", "5 秒")
+    st.session_state["audio_key"] = saved_data.get("audio", "生成配套音效")
+    st.session_state["snapshot_loaded"] = True
 
 # ================= 4. 企业级资产中台引擎 =================
 def upload_file_to_supabase(file_bytes, ext, bucket="assets"):
@@ -132,14 +149,16 @@ def fetch_and_store_video(temp_url):
 # ================= 5. 员工创作台主逻辑 =================
 st.markdown("## 🎬 魔方国际影业 - 视频生成台")
 with st.container(border=True):
-    prompt = st.text_area("📝 画面描述 (Prompt)", key="prompt_input", on_change=save_draft, height=150, placeholder="写完提示词后，随便点一下网页空白处，系统就会静默保存您的草稿。")
+    # 核心修复 1：依然绑定快照保存，提醒员工点击空白处
+    prompt = st.text_area("📝 画面描述 (Prompt)", key="prompt_input", on_change=save_snapshot, height=150, placeholder="⚠️ 防丢提示：输入完成后，请务必用鼠标在框外空白处点击一下，字迹即可瞬间硬写进服务器草稿箱！")
     
     col1, col2, col3, col4, col5 = st.columns(5)
-    with col1: ref_mode = st.selectbox("🎯 模式", ["0. 纯文生视频", "1. 首帧生视频", "2. 首尾帧生视频", "3. 多模态参考"])
-    with col2: model_type = st.selectbox("⚙️ 引擎", ["Seedance 2.0 (画质)", "Seedance 2.0 fast (速度)"])
-    with col3: ratio = st.selectbox("📏 比例", ["自适应", "16:9", "9:16"])
-    with col4: duration = st.selectbox("⏱️ 时长", ["5 秒", "8 秒", "10 秒", "15 秒", "智能决定 (-1)"])
-    with col5: audio_opt = st.selectbox("🎵 声音", ["生成配套音效", "无声版"])
+    # 核心修复 2：给所有的下拉框发放身份证 (key)，并绑定 on_change 瞬间保存快照
+    with col1: ref_mode = st.selectbox("🎯 模式", ["0. 纯文生视频", "1. 首帧生视频", "2. 首尾帧生视频", "3. 多模态参考"], key="ref_mode_key", on_change=save_snapshot)
+    with col2: model_type = st.selectbox("⚙️ 引擎", ["Seedance 2.0 (画质)", "Seedance 2.0 fast (速度)"], key="model_key", on_change=save_snapshot)
+    with col3: ratio = st.selectbox("📏 比例", ["自适应", "16:9", "9:16"], key="ratio_key", on_change=save_snapshot)
+    with col4: duration = st.selectbox("⏱️ 时长", ["5 秒", "8 秒", "10 秒", "15 秒", "智能决定 (-1)"], key="duration_key", on_change=save_snapshot)
+    with col5: audio_opt = st.selectbox("🎵 声音", ["生成配套音效", "无声版"], key="audio_key", on_change=save_snapshot)
     
     st.write("---")
     asset_1 = asset_2 = multi_assets = ""
@@ -269,7 +288,6 @@ def auto_polling_gallery():
                     with st.container(border=True):
                         
                         if item["status"] in ["running", "queued"]:
-                            # 【绝密修复】：实时比对原子钟时间，哪怕循环里有 3 个任务排队，也只会在间隔大于 3.5 秒时才会发出下一个查询，彻底避免并发熔断！
                             if time.time() - st.session_state["last_api_call"] > 3.5:
                                 try:
                                     s_res = requests.post(GET_URL, headers=headers, json={"id": item["task_id"]})
